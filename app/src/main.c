@@ -106,6 +106,7 @@ int main(void)
 	zd_wm_desktop_attach_events(&wm);
 	wm.on_client_destroyed = zd_zapp_on_client_destroyed;
 	wm.on_client_focus = zd_zapp_on_client_focus;
+	wm.on_client_click = zd_zapp_on_client_click;
 	zd_zapp_loader_init(&wm, &session);
 	zd_launcher_init(&layers, &session, on_app_chosen, &wm);
 	lvgl_unlock();

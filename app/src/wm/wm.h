@@ -92,6 +92,12 @@ struct zd_wm {
 	 * into a ZD_EV_WINDOW_FOCUS / _BLUR for the owning zapp.
 	 */
 	void (*on_client_focus)(struct zd_client *client, bool focused);
+
+	/* Called on a click inside a client's content area, with coordinates
+	 * relative to that area's top-left -- the same origin a zapp positions
+	 * its widgets in, so it never has to know the chrome's dimensions.
+	 */
+	void (*on_client_click)(struct zd_client *client, int16_t x, int16_t y);
 };
 
 void zd_wm_init(struct zd_wm *wm, struct zd_layers *layers);

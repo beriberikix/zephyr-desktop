@@ -4,7 +4,7 @@ The contract is `include/zd/zapp_abi.h`. This document explains the parts of it
 that a header comment cannot: why it is shaped this way, and what it does *not*
 promise.
 
-Current version: **0.2**.
+Current version: **0.3**.
 
 ## Shape
 
@@ -89,12 +89,70 @@ A zapp never holds a pointer to a desktop object. It holds a handle packing a
 slot index and a generation counter. Every call checks the slot is live, the
 generation matches, the kind matches, and the object belongs to the caller.
 
+Windows, labels, open files and open directories all go through the same table.
+That files fitted with nothing but a new `enum zd_handle_kind` value is the first
+evidence the scheme generalises beyond the WM it was written for.
+
 Without an MMU this is the only part of the isolation story that genuinely
 works. It does not stop a malicious extension. It turns the overwhelmingly
 common failure — use-after-close — from a use-after-free into `-EINVAL`, and
 stops one zapp touching another's windows by guessing. `zd_selftest_run()`
 asserts all of this at boot, including that a stale handle does not resolve into
 a slot's *new* occupant.
+
+## Storage
+
+Added in 0.3. Before it, `path_resolve()` could tell a zapp where its home
+directory was and there was no call that could then do anything with the answer:
+`fs_shim.c` described itself as the choke point every zapp filesystem call
+passes through, and nothing passed through it.
+
+Paths are absolute, and every call runs them through `zd_fs_resolve()` first:
+`..`, relative paths, anything outside the session's roots, and any write to a
+read-only root are refused with `-EINVAL` or `-EACCES`. Build paths from
+`path_resolve()`; a zapp cannot know whether the root is `/RAM:` or `/SD:`, and
+should not.
+
+| flag | meaning |
+|---|---|
+| `ZD_O_READ` / `ZD_O_WRITE` | at least one is required |
+| `ZD_O_CREATE` | create if absent |
+| `ZD_O_APPEND` | seek to end after opening |
+| `ZD_O_TRUNC` | discard existing contents |
+
+### Reads and writes may be short
+
+This is a contract, not an implementation detail. One call moves at most
+`CONFIG_ZD_FS_IO_CHUNK` bytes (4096 by default) and may move fewer. Zapps loop.
+
+The reason is the threading model. Zapps run as callbacks on the desktop thread,
+so a transfer stops the entire UI while it runs — and on the CoreS3, where the
+SD card's MISO line is also the display's data/command pin, the screen
+*physically cannot be drawn* for the duration. Bounding one call bounds the
+stall. Making I/O asynchronous instead would mean giving zapps their own thread,
+which is `ZD_ZAPP_FLAG_WANTS_THREAD`, still reserved.
+
+### Bounds
+
+- `CONFIG_ZD_MAX_OPEN_FILES` (8) and `CONFIG_ZD_MAX_OPEN_DIRS` (4), desktop-wide,
+  from fixed arrays rather than the heap — a leak announces itself as exhaustion.
+- `CONFIG_ZD_MAX_OPEN_PER_ZAPP` (4) counts files and directories together, so one
+  instance cannot starve the desktop.
+- Everything an instance still holds is closed at teardown, after `fini()` — but
+  the quota is small enough that a zapp relying on that will fail first.
+
+### What it does not enforce
+
+Everything in "What the MVP does not enforce" below still applies, unchanged.
+The shim is the only *linkable* route to the filesystem, not the only possible
+one: with no MMU a loaded extension is trusted code in the kernel address space.
+Permissions here are advisory and filesystem-level. Saying otherwise would be
+the one genuinely dishonest thing this document could do.
+
+`zd_selftest_run()` asserts the refusals, the round trip, `-EBADF` on a closed
+handle, the kind and owner checks, the quota and the teardown at boot — fourteen
+checks, on every target, because the interesting failures are
+configuration-dependent.
 
 ## The exported symbol surface
 
@@ -129,7 +187,9 @@ Stated plainly so nobody mistakes the shim for more than it is:
   watchdog that can kill a zapp needs the zapp to own a thread —
   `ZD_ZAPP_FLAG_WANTS_THREAD` is defined and reserved, not honoured.
 - **Refusing a close.** `ZD_EV_WINDOW_CLOSE_REQUEST` is defined but never sent;
-  the WM closes unconditionally.
+  the WM closes unconditionally. With storage in the ABI this now matters: a
+  zapp holding unsaved state has no way to ask for a moment.
+- **Storage quotas in bytes.** A zapp may fill the volume.
 
 ## Build
 

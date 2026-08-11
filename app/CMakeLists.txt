@@ -21,6 +21,7 @@ target_sources(app PRIVATE
   src/host/session.c
   src/host/storage.c
   src/host/fs_shim.c
+  src/host/fs_api.c
   src/host/host_api.c
   src/loader/zapp_loader.c
   src/loader/zapp_instance.c

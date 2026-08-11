@@ -18,6 +18,7 @@
 
 #include "zapp_instance.h"
 #include "../host/bus_arb.h"
+#include "../host/fs_api.h"
 #include "../host/host_api.h"
 #include "../wm/handle.h"
 
@@ -384,6 +385,22 @@ void zd_zapp_on_client_focus(struct zd_client *client, bool focused)
 	zd_zapp_dispatch(inst, &ev);
 }
 
+void zd_zapp_on_client_click(struct zd_client *client, int16_t x, int16_t y)
+{
+	struct zd_zapp_instance *inst = client->owner;
+	struct zd_event ev = {
+		.type = ZD_EV_CLICK,
+		.win = (zd_window_t)client->handle,
+		.click = { .x = x, .y = y },
+	};
+
+	if (inst == NULL || client->handle == 0) {
+		return; /* desktop-internal window */
+	}
+
+	zd_zapp_dispatch(inst, &ev);
+}
+
 static void finish_unload(struct zd_zapp_instance *inst)
 {
 	LOG_DBG("unloading instance %u '%s'", inst->id, inst->name);
@@ -393,6 +410,13 @@ static void finish_unload(struct zd_zapp_instance *inst)
 		inst->manifest->fini(&inst->ctx);
 		inst->wm->in_zapp_callback--;
 	}
+
+	/* Files first, and only after fini() -- which is a zapp's last chance to
+	 * flush. zd_handle_free_all() below only invalidates handles; on its own
+	 * it would leave the filesystem holding the file objects behind them open
+	 * for the rest of the boot.
+	 */
+	zd_fs_close_all(inst);
 
 	/* Any handle the zapp still holds dies with it; the generation bump means
 	 * a stale copy can never resolve, even into a later instance's slot.
@@ -407,8 +431,8 @@ static void finish_unload(struct zd_zapp_instance *inst)
 	inst->pending_unload = false;
 	live_instances--;
 
-	LOG_INF("unloaded instance %u; %u zapp(s) live, %u handle(s) live", inst->id,
-		live_instances, zd_handle_live_count());
+	LOG_INF("unloaded instance %u; %u zapp(s) live, %u handle(s) live, %u file(s) open",
+		inst->id, live_instances, zd_handle_live_count(), zd_fs_open_count());
 }
 
 void zd_zapp_reap(void)

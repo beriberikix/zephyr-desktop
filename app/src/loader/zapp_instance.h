@@ -72,6 +72,7 @@ void zd_zapp_window_gone(struct zd_zapp_instance *inst);
 /* Hooks installed on the WM at boot, so the WM never has to know zapps exist. */
 void zd_zapp_on_client_destroyed(struct zd_client *client);
 void zd_zapp_on_client_focus(struct zd_client *client, bool focused);
+void zd_zapp_on_client_click(struct zd_client *client, int16_t x, int16_t y);
 
 /** Finish teardowns. Runs from the desktop loop, never from dispatch. */
 void zd_zapp_reap(void);

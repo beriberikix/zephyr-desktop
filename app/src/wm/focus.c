@@ -62,6 +62,33 @@ static void frame_event(lv_event_t *e)
 	zd_wm_focus(wm, client);
 }
 
+/*
+ * A click landing in the content area, translated for the zapp.
+ *
+ * Separate from frame_event because the frame only ever means "raise and
+ * focus": it fires on PRESSED, for the chrome as much as the content, and a
+ * zapp must not be told the user clicked in its window when they were actually
+ * dragging its titlebar or hitting its close box.
+ */
+static void content_event(lv_event_t *e)
+{
+	struct zd_client *client = lv_event_get_user_data(e);
+	lv_indev_t *indev = lv_indev_active();
+	lv_point_t point;
+	lv_area_t area;
+
+	if (client->pending_destroy || indev == NULL ||
+	    client->wm->on_client_click == NULL) {
+		return;
+	}
+
+	lv_indev_get_point(indev, &point);
+	lv_obj_get_coords(client->content, &area);
+
+	client->wm->on_client_click(client, (int16_t)(point.x - area.x1),
+				    (int16_t)(point.y - area.y1));
+}
+
 static void close_event(lv_event_t *e)
 {
 	struct zd_client *client = lv_event_get_user_data(e);
@@ -98,6 +125,7 @@ void zd_wm_client_attach_events(struct zd_client *client)
 	lv_obj_add_flag(client->content, bubble);
 
 	lv_obj_add_event_cb(client->close_btn, close_event, LV_EVENT_CLICKED, client);
+	lv_obj_add_event_cb(client->content, content_event, LV_EVENT_CLICKED, client);
 
 	zd_wm_drag_attach(client);
 }

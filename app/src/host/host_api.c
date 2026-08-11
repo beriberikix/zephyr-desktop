@@ -16,6 +16,7 @@
 #include <zephyr/llext/symbol.h>
 #include <zephyr/logging/log.h>
 
+#include "fs_api.h"
 #include "host_api.h"
 #include "session.h"
 #include "../loader/zapp_instance.h"
@@ -201,6 +202,139 @@ static int api_path_resolve(zd_zapp_ctx_t ctx, enum zd_dir dir, char *out, uint3
 	return zd_session_path(inst->session, dir, out, out_len);
 }
 
+/*
+ * The storage entry points are all the same three lines: resolve the caller,
+ * forward. Everything that makes them interesting -- path scoping, quotas, the
+ * bus arbiter, the handle registry -- lives in fs_api.c, so that there is one
+ * place to read and one place to get wrong.
+ */
+
+static int api_fs_open(zd_zapp_ctx_t ctx, const char *path, uint32_t flags, zd_file_t *out)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+	uintptr_t handle;
+	int ret;
+
+	if (inst == NULL || out == NULL) {
+		return -EINVAL;
+	}
+
+	ret = zd_fs_open(inst->session, inst, path, flags, &handle);
+	if (ret != 0) {
+		return ret;
+	}
+
+	*out = (zd_file_t)handle;
+	return 0;
+}
+
+static int api_fs_read(zd_zapp_ctx_t ctx, zd_file_t file, void *buf, uint32_t len)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_fs_read(inst, (uintptr_t)file, buf, len) : -EINVAL;
+}
+
+static int api_fs_write(zd_zapp_ctx_t ctx, zd_file_t file, const void *buf, uint32_t len)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_fs_write(inst, (uintptr_t)file, buf, len) : -EINVAL;
+}
+
+static int api_fs_seek(zd_zapp_ctx_t ctx, zd_file_t file, int32_t offset, int whence)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_fs_seek(inst, (uintptr_t)file, offset, whence) : -EINVAL;
+}
+
+static int api_fs_tell(zd_zapp_ctx_t ctx, zd_file_t file)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_fs_tell(inst, (uintptr_t)file) : -EINVAL;
+}
+
+static int api_fs_sync(zd_zapp_ctx_t ctx, zd_file_t file)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_fs_sync(inst, (uintptr_t)file) : -EINVAL;
+}
+
+static void api_fs_close(zd_zapp_ctx_t ctx, zd_file_t file)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	if (inst != NULL) {
+		zd_fs_close(inst, (uintptr_t)file);
+	}
+}
+
+static int api_fs_opendir(zd_zapp_ctx_t ctx, const char *path, zd_dir_t *out)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+	uintptr_t handle;
+	int ret;
+
+	if (inst == NULL || out == NULL) {
+		return -EINVAL;
+	}
+
+	ret = zd_fs_opendir(inst->session, inst, path, &handle);
+	if (ret != 0) {
+		return ret;
+	}
+
+	*out = (zd_dir_t)handle;
+	return 0;
+}
+
+static int api_fs_readdir(zd_zapp_ctx_t ctx, zd_dir_t dir, struct zd_dirent *out)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_fs_readdir(inst, (uintptr_t)dir, out) : -EINVAL;
+}
+
+static void api_fs_closedir(zd_zapp_ctx_t ctx, zd_dir_t dir)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	if (inst != NULL) {
+		zd_fs_closedir(inst, (uintptr_t)dir);
+	}
+}
+
+static int api_fs_stat(zd_zapp_ctx_t ctx, const char *path, struct zd_dirent *out)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_fs_stat(inst->session, path, out) : -EINVAL;
+}
+
+static int api_fs_mkdir(zd_zapp_ctx_t ctx, const char *path)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_fs_mkdir(inst->session, path) : -EINVAL;
+}
+
+static int api_fs_unlink(zd_zapp_ctx_t ctx, const char *path)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_fs_unlink(inst->session, path) : -EINVAL;
+}
+
+static int api_fs_rename(zd_zapp_ctx_t ctx, const char *from, const char *to)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_fs_rename(inst->session, from, to) : -EINVAL;
+}
+
 static void api_log(zd_zapp_ctx_t ctx, int level, const char *msg)
 {
 	struct zd_zapp_instance *inst = instance_of(ctx);
@@ -252,7 +386,12 @@ static void *api_unsafe_lvgl_content(zd_zapp_ctx_t ctx, zd_window_t win)
 	.window_get_geometry = api_window_get_geometry, .label_create = api_label_create,  \
 	.label_set_text = api_label_set_text, .path_resolve = api_path_resolve,            \
 	.log = api_log, .uptime_ms = api_uptime_ms, .set_user_data = api_set_user_data,      \
-	.get_user_data = api_get_user_data
+	.get_user_data = api_get_user_data, .fs_open = api_fs_open, .fs_read = api_fs_read, \
+	.fs_write = api_fs_write, .fs_seek = api_fs_seek, .fs_tell = api_fs_tell,           \
+	.fs_sync = api_fs_sync, .fs_close = api_fs_close, .fs_opendir = api_fs_opendir,     \
+	.fs_readdir = api_fs_readdir, .fs_closedir = api_fs_closedir,                       \
+	.fs_stat = api_fs_stat, .fs_mkdir = api_fs_mkdir, .fs_unlink = api_fs_unlink,       \
+	.fs_rename = api_fs_rename
 
 static const struct zd_host_api host_api_untrusted = {
 	ZD_HOST_API_COMMON,

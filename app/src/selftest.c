@@ -20,6 +20,7 @@
 #include <zephyr/logging/log.h>
 
 #include "selftest.h"
+#include "host/fs_api.h"
 #include "host/fs_shim.h"
 #include "host/storage.h"
 #include "wm/handle.h"
@@ -108,12 +109,101 @@ static void test_handles(void)
 	check(zd_handle_deref(0, ZD_HANDLE_WINDOW, owner_a) == NULL, "handle 0 is never valid");
 }
 
+/*
+ * The storage API, driven with a fake owner.
+ *
+ * fs_api.c never dereferences the owner -- it is a quota and ownership tag, and
+ * the session travels separately -- which is precisely what lets these run at
+ * boot, before the loader or any instance exists.
+ */
+static void test_fs_api(const struct zd_session *session)
+{
+	struct zd_zapp_instance *owner = (struct zd_zapp_instance *)0xF1;
+	struct zd_zapp_instance *other = (struct zd_zapp_instance *)0xF2;
+	static const char payload[] = "zephyr-desktop storage round trip";
+	const char *path = ZD_PATH_TMP "/selftest.txt";
+	uint32_t before = zd_fs_open_count();
+	char buf[sizeof(payload)] = { 0 };
+	uintptr_t handles[CONFIG_ZD_MAX_OPEN_PER_ZAPP + 1] = { 0 };
+	struct zd_dirent entry;
+	bool quota_hit = false;
+	uintptr_t file = 0;
+	int ret;
+
+	/* --- the refusals, which are the whole point of the shim --- */
+
+	check(zd_fs_open(session, owner, "/somewhere/else", ZD_O_READ, &file) == -EACCES,
+	      "fs_open outside every root is refused");
+
+	check(zd_fs_open(session, owner, ZD_PATH_TMP "/../../etc/passwd", ZD_O_READ, &file) ==
+		      -EINVAL,
+	      "fs_open with .. is refused");
+
+	check(zd_fs_open(session, owner, ZD_PATH_SYSTEM_ZAPPS "/new.llext",
+			 ZD_O_WRITE | ZD_O_CREATE, &file) == -EACCES,
+	      "fs_open for write in the read-only system root is refused");
+
+	check(zd_fs_mkdir(session, ZD_PATH_SYSTEM "/nope") == -EACCES,
+	      "fs_mkdir in the read-only system root is refused");
+
+	/* --- the round trip --- */
+
+	ret = zd_fs_open(session, owner, path, ZD_O_WRITE | ZD_O_CREATE | ZD_O_TRUNC, &file);
+	check(ret == 0, "fs_open creates a file under tmp");
+	if (ret != 0) {
+		return; /* nothing below can mean anything */
+	}
+
+	check(zd_fs_write(owner, file, payload, sizeof(payload)) == (int)sizeof(payload),
+	      "fs_write accepts the whole payload");
+	zd_fs_close(owner, file);
+
+	check(zd_fs_read(owner, file, buf, sizeof(buf)) == -EBADF,
+	      "a file handle used after close returns -EBADF");
+
+	ret = zd_fs_open(session, owner, path, ZD_O_READ, &file);
+	check(ret == 0, "fs_open reopens the file for reading");
+	check(zd_fs_read(owner, file, buf, sizeof(buf)) == (int)sizeof(payload) &&
+		      strcmp(buf, payload) == 0,
+	      "fs_read returns exactly what was written");
+
+	/* Kind and ownership are checked on every call, not just on windows. */
+	check(zd_fs_readdir(owner, file, &entry) == -EBADF,
+	      "a file handle used as a directory does not resolve");
+	check(zd_fs_read(other, file, buf, sizeof(buf)) == -EBADF,
+	      "another instance's file handle does not resolve");
+
+	zd_fs_close(owner, file);
+
+	/* --- quota and teardown --- */
+
+	for (size_t i = 0; i < ARRAY_SIZE(handles); i++) {
+		ret = zd_fs_open(session, owner, path, ZD_O_READ, &handles[i]);
+		if (ret != 0) {
+			quota_hit = i == CONFIG_ZD_MAX_OPEN_PER_ZAPP && ret == -EMFILE;
+			break;
+		}
+	}
+
+	/* Asserted after the loop, so a quota that never fires is a FAIL rather
+	 * than a check that silently never ran.
+	 */
+	check(quota_hit, "the per-instance open quota is enforced");
+
+	zd_fs_close_all(owner);
+	check(zd_fs_open_count() == before,
+	      "close_all returns every file the instance left open");
+
+	check(zd_fs_unlink(session, path) == 0, "fs_unlink removes the scratch file");
+}
+
 void zd_selftest_run(const struct zd_session *session)
 {
 	failures = 0;
 
 	test_fs_scope(session);
 	test_handles();
+	test_fs_api(session);
 
 	if (failures == 0) {
 		LOG_INF("selftest: all checks passed");

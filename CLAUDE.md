@@ -18,7 +18,8 @@ Two things are load-bearing and get real care. Everything else may be scrappy:
 1. **The WM data model and event loop** (`app/src/wm/`) — modelled on a tiny X11 stacking
    WM. A `zd_client` struct plus one central dispatch path.
 2. **The zapp ABI** (`include/zd/zapp_abi.h`) — designed as if the terminal, text editor and
-   file browser already ran on it; implemented only as far as hello world needs.
+   file browser already ran on it. Implemented as far as hello world needs, plus storage
+   (ABI 0.3), which was the one designed-but-missing half.
 
 ## Target
 
@@ -60,7 +61,9 @@ Hardware targets, both building but not yet run on silicon:
   SE variant is to disable the display. `app/src/host/bus_arb.c` borrows the pin
   back around each filesystem operation instead. Add a filesystem call site on
   this board and it must be bracketed, or it will read from a pin pointed at the
-  screen. See `docs/hardware.md`.
+  screen. Zapp-facing storage all goes through `app/src/host/fs_api.c`, which
+  brackets every call it makes; keep it that way rather than growing a second
+  call site. See `docs/hardware.md`.
 
 ## Zephyr version
 
@@ -78,7 +81,7 @@ app/                the desktop image (the Zephyr application)
   src/wm/           client struct, stacking, focus, drag, handle registry
   src/chrome/       retro bevels, titlebar, palette
   src/shell/        background, taskbar, launcher, clock
-  src/host/         host-API vtable, fs shim, session
+  src/host/         host-API vtable, fs shim + zapp storage, session
   src/loader/       llext discover/load/instance/unload, boot seeding
 zapps/              desktop apps, one .c file each (ELF_OBJECT allows only one).
                     Named zapps/, not apps/, so it is never misread as Zephyr's app/
@@ -114,6 +117,10 @@ west build -t run                                     # opens a cocoa window
   syscalls if `CONFIG_USERSPACE` ever arrives.
 - **No direct framebuffer access, anywhere.** Everything stays behind LVGL's draw layer so
   the PXP draw unit can be switched on later without touching WM logic.
+- **Zapps have no libc.** `CONFIG_LLEXT_EXPORT_DEFAULT_GROUPS=n` leaves exactly one
+  importable symbol, so `strlen` and `snprintf` are out — and, less obviously, GCC
+  synthesises a `memset` call from an ordinary struct assignment. That builds fine and
+  fails at load. After touching a zapp, check `nm -u build/<name>.llext`.
 - **Permissions are advisory.** The fs shim is a contract, not a security boundary: with
   no MMU isolation a loaded llext is trusted code in the kernel address space. Say so in
   docs rather than implying otherwise.

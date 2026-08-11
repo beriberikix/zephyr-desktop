@@ -25,9 +25,17 @@
 struct zd_client;
 struct zd_zapp_instance;
 
+/*
+ * The registry is not LVGL-specific, despite living in wm/. Files and
+ * directories go through the same slots, the same generation counter and the
+ * same owner check as windows -- which is the first evidence that the scheme
+ * generalises past the WM at all.
+ */
 enum zd_handle_kind {
 	ZD_HANDLE_WINDOW,
 	ZD_HANDLE_LABEL,
+	ZD_HANDLE_FILE,
+	ZD_HANDLE_DIR,
 };
 
 /** Register an object and return its handle, or 0 if the table is full. */

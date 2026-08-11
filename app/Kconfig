@@ -32,6 +32,41 @@ config ZD_MAX_WINDOWS_PER_ZAPP
 	int "Maximum windows a single app instance may own"
 	default 4
 
+config ZD_MAX_OPEN_FILES
+	int "Maximum simultaneously open files, desktop-wide"
+	default 8
+	help
+	  Open files come from a fixed array for the same reason windows do: a
+	  zapp that forgets to close should hit a wall that says so, not grow the
+	  heap quietly. Each entry costs a struct fs_file_t.
+
+config ZD_MAX_OPEN_DIRS
+	int "Maximum simultaneously open directories, desktop-wide"
+	default 4
+	help
+	  Directories are only held open while something is being listed, so the
+	  bound can be far tighter than the file one.
+
+config ZD_MAX_OPEN_PER_ZAPP
+	int "Maximum open files and directories a single zapp instance may hold"
+	default 4
+	help
+	  Counts files and directories together. Mirrors
+	  ZD_MAX_WINDOWS_PER_ZAPP: one instance must not be able to starve the
+	  rest of the desktop of a shared, bounded resource.
+
+config ZD_FS_IO_CHUNK
+	int "Largest number of bytes one zapp read or write may move"
+	default 4096
+	help
+	  Zapps run as callbacks on the desktop thread, so a transfer stops the
+	  whole UI while it runs -- and on a board where storage and the display
+	  share a pin (see ZD_SPI_DC_MISO_ARBITER) the screen physically cannot
+	  be drawn during one. Capping a single call caps the stall.
+
+	  Reads and writes are therefore allowed to be short, which the ABI
+	  states as a contract rather than an implementation detail: zapps loop.
+
 config ZD_FS_AUTOFORMAT
 	bool "Format the app volume if it has no filesystem"
 	default y

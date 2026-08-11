@@ -1,6 +1,6 @@
 # zephyr-desktop MVP — design doc + task list
 
-> **Status: MVP complete.** Milestones A-G are done and verified on `qemu_cortex_a53`;
+> **Status: MVP complete; storage added post-MVP (ABI 0.3, milestone I below).** Milestones A-G are done and verified on `qemu_cortex_a53`;
 > milestone H builds and is documented, with the on-board run left for you (see
 > `docs/hardware.md`) since it needs the EVK in hand. Workspace pinned, target strategy proven end to end,
 > retro theme, taskbar, and a full stacking WM with drag, focus and deferred destruction
@@ -818,6 +818,54 @@ holds. Details in `docs/hardware.md`.
 point of the checkpoint is that a `.llext` arrives from outside, so the desktop must find
 zapps it did not write itself.
 
+### I — Storage in the zapp ABI — **DONE (ABI 0.3)**
+
+Post-MVP. The filesystem half of §4.2 was specified and never built: the vtable shipped
+`path_resolve()` and nothing that could act on the answer, so `host/fs_shim.c` — a file
+whose header describes it as the choke point every zapp filesystem call passes through —
+was reached only by the boot selftest.
+
+31. ✅ ABI 0.3: `zd_file_t`, `zd_dir_t`, `ZD_O_*`, `struct zd_dirent`, and fourteen
+    appended vtable slots (open/read/write/seek/tell/sync/close, opendir/readdir/closedir,
+    stat/mkdir/unlink/rename). Purely additive; `struct_size` and the minor gate did the
+    rest.
+32. ✅ `host/fs_api.c`, the only place zapp storage touches Zephyr's `fs_*`. Resolve
+    through the shim, bracket with the bus arbiter, hand back a generation-counted
+    handle. Fixed arrays for open objects; a per-instance quota covering files and
+    directories together.
+33. ✅ `ZD_EV_CLICK` is now actually delivered — it had been a defined enum value nothing
+    ever sent, which made "a zapp reacts to the user" impossible. `wm->on_client_click`,
+    fired from the content area only, in content-relative coordinates.
+34. ✅ `zapps/notes` earns its name: it appends a line per click to `$HOME/notes.txt` and
+    shows the file back on relaunch, from every window it owns.
+35. ✅ Fourteen new boot selftests. Verified on all three targets; the CoreS3 run is the
+    real one, since it writes an SD card through the GPIO35 arbiter with the display live.
+
+**[I] The handle registry generalised for free.** Files and directories needed one new
+`enum zd_handle_kind` value and nothing else — same slots, same generation counter, same
+owner check. The scheme was written for windows and turns out not to have been about
+windows.
+
+**[I] `zd_fs_close_all()` closed files but leaked their handles.** Harmless in the real
+path, where instance teardown calls `zd_handle_free_all()` immediately after — and
+therefore invisible, until the boot selftest (which has no teardown) reported a baseline
+of four live handles that should have been zero. The slot now remembers its own handle so
+the operation is complete on its own. An "it works because the caller happens to clean up
+after us" is a bug with a delay fuse.
+
+**[I] A zapp has no libc, and the compiler does not know that.**
+`CONFIG_LLEXT_EXPORT_DEFAULT_GROUPS=n` means one importable symbol, so `strlen` and
+`snprintf` are unavailable — which is easy to remember. What is not: GCC *synthesises* a
+call to `memset` from an ordinary struct assignment. `notes.llext` built cleanly and would
+have failed at load with an undefined symbol a long way from the line responsible. Caught
+by `nm -u` on the artifact, which is now the thing to check after touching a zapp.
+
+**[I] Reads are contractually short.** `CONFIG_ZD_FS_IO_CHUNK` caps a single transfer.
+With zapps on the desktop thread, an unbounded read stops the UI — and on the CoreS3 it
+holds GPIO35 away from the display, so the screen cannot be drawn at all while it runs.
+Bounding the call is the honest mitigation for staying single-threaded; making I/O
+asynchronous means thread-per-zapp, which is still reserved.
+
 ---
 
 ## 8. Explicitly deferred
@@ -825,11 +873,14 @@ zapps it did not write itself.
 Named so they don't leak into the MVP: any catalog zapp (file browser, text editor, image
 viewer, media player, terminal, web server, web browser); hardware acceleration (PXP
 exists and is one Kconfig away — not now); MCU→MPU responsive layout morph; **window
-resize**; IPC and desktop services (clipboard, notifications); multiple displays;
-hardware-enforced isolation (`USERSPACE` + `llext_add_domain` + memory domains); a theming
-engine (MVP hardcodes one palette); sound; real multi-user login; thread-per-zapp
-(`ZD_ZAPP_FLAG_WANTS_THREAD` is reserved, not honoured); out-of-tree zapp builds via the
-llext EDK; the fw_cfg zapp-delivery channel; keyboard input; zapp icons; `native_sim`.
+resize**, minimize, and a taskbar window list; IPC and desktop services (clipboard,
+notifications); multiple displays; hardware-enforced isolation (`USERSPACE` +
+`llext_add_domain` + memory domains); a theming engine (MVP hardcodes one palette); sound;
+real multi-user login; thread-per-zapp (`ZD_ZAPP_FLAG_WANTS_THREAD` is reserved, not
+honoured); out-of-tree zapp builds via the llext EDK; the fw_cfg zapp-delivery channel;
+keyboard input; `ZD_EV_WINDOW_CLOSE_REQUEST`; zapp icons; `native_sim`.
+
+**Filesystem access from a zapp left this list in ABI 0.3** — see milestone I.
 
 ---
 
