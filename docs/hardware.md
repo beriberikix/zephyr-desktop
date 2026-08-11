@@ -43,10 +43,10 @@ west build -p -b mimxrt1060_evk/mimxrt1062/qspi app -d build-rt1060
 Prepare a FAT-formatted card:
 
 ```
-/system/apps/hello.llext     <- copy build-rt1060/hello.llext
-/system/apps/notes.llext     <- copy build-rt1060/notes.llext
+/system/zapps/hello.llext    <- copy build-rt1060/hello.llext
+/system/zapps/notes.llext    <- copy build-rt1060/notes.llext
 /system/share/
-/home/user/apps/
+/home/user/zapps/
 /tmp/
 ```
 
@@ -66,7 +66,7 @@ output is the boot sequence:
 mounted /SD:
 session uid=1000 user='user' home='/SD:/home/user'
 selftest: all checks passed
-discovered app 'hello' at /SD:/system/apps/hello.llext
+discovered app 'hello' at /SD:/system/zapps/hello.llext
 discovered N app(s)
 zephyr-desktop up on <display>
 ```

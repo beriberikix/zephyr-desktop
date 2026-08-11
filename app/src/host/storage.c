@@ -56,7 +56,7 @@ static int ensure_dir(const char *path)
 int zd_storage_init(void)
 {
 	static const char *const dirs[] = {
-		ZD_PATH_SYSTEM,       ZD_PATH_SYSTEM_APPS, ZD_PATH_SYSTEM_SHARE,
+		ZD_PATH_SYSTEM,       ZD_PATH_SYSTEM_ZAPPS, ZD_PATH_SYSTEM_SHARE,
 		ZD_PATH_HOME_BASE,    ZD_PATH_TMP,
 	};
 	int ret;
@@ -93,7 +93,7 @@ int zd_storage_ensure_home(const char *home)
 		return ret;
 	}
 
-	ret = snprintf(apps, sizeof(apps), "%s/apps", home);
+	ret = snprintf(apps, sizeof(apps), "%s/zapps", home);
 	if (ret < 0 || ret >= (int)sizeof(apps)) {
 		return -ENAMETOOLONG;
 	}

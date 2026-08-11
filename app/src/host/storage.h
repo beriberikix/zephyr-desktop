@@ -19,13 +19,13 @@
 #define ZD_FS_ROOT CONFIG_ZD_FS_ROOT
 
 #define ZD_PATH_SYSTEM       ZD_FS_ROOT "/system"
-#define ZD_PATH_SYSTEM_APPS  ZD_FS_ROOT "/system/apps"
+#define ZD_PATH_SYSTEM_ZAPPS ZD_FS_ROOT "/system/zapps"
 #define ZD_PATH_SYSTEM_SHARE ZD_FS_ROOT "/system/share"
 #define ZD_PATH_HOME_BASE    ZD_FS_ROOT "/home"
 #define ZD_PATH_TMP          ZD_FS_ROOT "/tmp"
 
 /** File extension every app binary carries. */
-#define ZD_APP_SUFFIX ".llext"
+#define ZD_ZAPP_SUFFIX ".llext"
 
 /**
  * @brief Mount the app filesystem and ensure the directory layout exists.
@@ -34,7 +34,7 @@
  */
 int zd_storage_init(void);
 
-/** Create a session's home directory and its apps/ subdirectory. */
+/** Create a session's home directory and its zapps/ subdirectory. */
 int zd_storage_ensure_home(const char *home);
 
 #endif /* ZD_HOST_STORAGE_H_ */

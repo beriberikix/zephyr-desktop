@@ -8,7 +8,7 @@
 #define ZD_LOADER_SEED_H_
 
 /**
- * @brief Write the built-in app binaries to /system/apps if absent.
+ * @brief Write the built-in app binaries to /system/zapps if absent.
  *
  * The .llext files are embedded in the image as C arrays at build time. This is
  * a stand-in for an installer, not a shortcut around the loader: what gets

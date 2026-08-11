@@ -364,7 +364,7 @@ struct zd_window_desc {
     uint32_t       flags;
 };
 
-enum zd_dir { ZD_DIR_HOME, ZD_DIR_SYSTEM_APPS, ZD_DIR_USER_APPS, ZD_DIR_TMP };
+enum zd_dir { ZD_DIR_HOME, ZD_DIR_SYSTEM_ZAPPS, ZD_DIR_USER_ZAPPS, ZD_DIR_TMP };
 
 struct zd_host_api {
     uint16_t abi_major, abi_minor;
@@ -441,7 +441,7 @@ and it is the only part of the isolation story that actually works without an MM
 ### 4.4 Lifecycle
 
 ```
-discover  scan /system/apps and <home>/apps for *.llext  → launcher entries
+discover  scan /system/zapps and <home>/zapps for *.llext  → launcher entries
    ↓ (user clicks)
 load      struct llext_fs_loader l = LLEXT_FS_LOADER(path);
           llext_load(&l.loader, name, &ext, &param)
@@ -533,10 +533,10 @@ the shim is the only exported route (§4.5). No hardware enforcement. Say this i
 **Filesystem layout** (identical on QEMU and hardware; only the mount table differs):
 
 ```
-/system/apps/        *.llext, system-installed        app-visible: read-only
+/system/zapps/       *.llext, system-installed        app-visible: read-only
 /system/share/       fonts, wallpaper, desktop assets app-visible: read-only
 /home/user/          the session's home               read-write
-/home/user/apps/     user-installed *.llext           read-write, also enumerated
+/home/user/zapps/    user-installed *.llext           read-write, also enumerated
 /tmp/                scratch                          read-write
 ```
 
@@ -546,7 +546,7 @@ RT1060: FAT over `zephyr,sdmmc-disk` on `usdhc1`, same paths.
 
 **Getting `.llext` files onto the QEMU FS:** `add_llext_target` emits `hello.llext` into
 the build dir; `generate_inc_file_for_target()` embeds it; `zd_seed_install()` writes it
-to `/system/apps/hello.llext` at boot if absent. The discover→open→`llext_fs_loader` path
+to `/system/zapps/hello.llext` at boot if absent. The discover→open→`llext_fs_loader` path
 is 100% real — only the delivery is synthetic, and it mirrors what an installer does. When
 apps move out-of-tree (EDK), swap the seed for the fw_cfg channel (§1.6) and the desktop
 image stops needing a rebuild per app.
@@ -703,7 +703,7 @@ accounting is verified.
 
 **[E] Paths are not free-form.** FATFS requires a mount point of the form `/<VOLUME>:`,
 with the volume string generated from the devicetree `disk-name`, so the root is `/RAM:`
-under QEMU and would be an SD volume on hardware. §5's `/system/apps` and `/home/user`
+under QEMU and would be an SD volume on hardware. §5's `/system/zapps` and `/home/user`
 are therefore *relative to* `CONFIG_ZD_FS_ROOT`, not absolute. This costs nothing because
 apps never build paths themselves — they resolve directories through the session — which
 is precisely the indirection §5 already called for, now load-bearing rather than
@@ -723,7 +723,7 @@ match, menu. Milestone F replaces them with a genuine build artifact.
 20. ✅ `wm/handle.c` — generation-counted registry with owner checks.
 21. ✅ `zapps/hello/hello.c`, built by `add_llext_target` into a 2968-byte aarch64
     relocatable ELF.
-22. ✅ `loader/seed.c` installs it to `/system/apps` on first boot.
+22. ✅ `loader/seed.c` installs it to `/system/zapps` on first boot.
 23. ✅ `loader/app_instance.c` — the full lifecycle.
 24. ✅ **Verified: 20 consecutive launch/close cycles, 20 loads, 20 unloads, zero errors,
     and after every single one `0 windows live, 8 slab blocks free, 0 apps live, 0
@@ -865,7 +865,7 @@ llext EDK; the fw_cfg app-delivery channel; keyboard input; app icons; `native_s
   the cocoa window. Every milestone A–G is demoable this way.
 - **The success criterion, end to end (after G):** boot → retro desktop with patterned
   background, taskbar, live clock → click launcher → menu lists `hello` and `hello2`
-  discovered from `/system/apps` → click `hello` twice → two windows, cascaded, retro
+  discovered from `/system/zapps` → click `hello` twice → two windows, cascaded, retro
   chrome → drag one over the other by its titlebar, click each to raise → correct z-order
   and titlebar focus styling → close both via the close button → console shows
   `llext_unload` for each, and the instrumented client-slab and llext-heap counters return

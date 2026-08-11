@@ -76,11 +76,11 @@ int zd_session_path(const struct zd_session *session, enum zd_dir dir, char *out
 	case ZD_DIR_HOME:
 		ret = snprintf(out, out_len, "%s", session->home);
 		break;
-	case ZD_DIR_SYSTEM_APPS:
-		ret = snprintf(out, out_len, "%s", ZD_PATH_SYSTEM_APPS);
+	case ZD_DIR_SYSTEM_ZAPPS:
+		ret = snprintf(out, out_len, "%s", ZD_PATH_SYSTEM_ZAPPS);
 		break;
-	case ZD_DIR_USER_APPS:
-		ret = snprintf(out, out_len, "%s/apps", session->home);
+	case ZD_DIR_USER_ZAPPS:
+		ret = snprintf(out, out_len, "%s/zapps", session->home);
 		break;
 	case ZD_DIR_TMP:
 		ret = snprintf(out, out_len, "%s", ZD_PATH_TMP);

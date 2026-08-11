@@ -10,12 +10,12 @@ mouse.
 
 ```
 +--------------------------------------------------+
-| +------------------+                             |
-| | Hello        [X] |                             |
-| +------------------+                             |
-| | hello world      |   <- drawn by a 3 KB .llext |
-| |                  |      loaded at runtime      |
-| +------------------+                             |
+| +--------------------------+                     |
+| | Hello (active)       [X] |                     |
+| +--------------------------+  <- drawn by a 3 KB |
+| | hello world, Zephyr!     |     .llext loaded   |
+| |                          |     at runtime      |
+| +--------------------------+                     |
 |                                                  |
 | [ Start ]                               [ 9:41 ] |
 +--------------------------------------------------+
@@ -25,8 +25,8 @@ mouse.
 
 The MVP is complete. Boot to a retro desktop; the launcher enumerates apps found
 on the filesystem; clicking one loads its `.llext` at runtime; the app calls into
-the desktop API to create a window and draw "hello world"; two instances can be
-open, dragged over each other with correct z-order and focus; closing a window
+the desktop API to create a window and draw "hello world, Zephyr!"; two instances
+can be open, dragged over each other with correct z-order and focus; closing one
 unloads the extension cleanly with no leaks.
 
 Verified over 20 consecutive launch/close cycles: 20 loads, 20 unloads, zero
@@ -77,7 +77,7 @@ static int hello_init(zd_app_ctx_t ctx, const struct zd_host_api *api)
         struct zd_window_desc desc = { .title = "Hello" };
         zd_window_t win = api->window_create(ctx, &desc);
 
-        api->label_create(ctx, win, "hello world", 8, 8);
+        api->label_create(ctx, win, "hello world, Zephyr!", 8, 8);
         api->set_user_data(ctx, (void *)win);
         return 0;
 }
@@ -93,7 +93,7 @@ LL_EXTENSION_SYMBOL(zd_app_manifest);
 ```
 
 No LVGL, no Zephyr, no idea where its window comes from or what draws it. Drop
-it in `zapps/<name>/<name>.c`, add the name to `ZD_APP_NAMES` in
+it in `zapps/<name>/<name>.c`, add the name to `ZD_ZAPP_NAMES` in
 `app/CMakeLists.txt`, and it builds as a separate `.llext` artifact.
 
 (`zapps/`, not `apps/`: Zephyr's convention is that `app/` holds the application

@@ -52,9 +52,9 @@ target_sources_ifdef(CONFIG_ZD_SEED_BUILTIN_APPS app PRIVATE src/loader/seed.c)
 # header outside app/ is what makes that a move rather than a rewrite.
 
 # Each app is one source file: ARM/ARM64 default to LLEXT_TYPE_ELF_OBJECT.
-set(ZD_APP_NAMES hello notes badabi)
+set(ZD_ZAPP_NAMES hello notes badabi)
 
-foreach(zd_app ${ZD_APP_NAMES})
+foreach(zd_app ${ZD_ZAPP_NAMES})
   set(ZD_${zd_app}_LLEXT ${PROJECT_BINARY_DIR}/${zd_app}.llext)
   add_llext_target(zd_app_${zd_app}
     OUTPUT  ${ZD_${zd_app}_LLEXT}

@@ -55,8 +55,8 @@ struct zd_rect {
  */
 enum zd_dir {
 	ZD_DIR_HOME,        /**< read-write */
-	ZD_DIR_SYSTEM_APPS, /**< read-only */
-	ZD_DIR_USER_APPS,   /**< read-write */
+	ZD_DIR_SYSTEM_ZAPPS, /**< read-only */
+	ZD_DIR_USER_ZAPPS,   /**< read-write */
 	ZD_DIR_TMP,         /**< read-write */
 };
 

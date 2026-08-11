@@ -51,8 +51,8 @@ static int install_one(const struct builtin *app)
 	ssize_t written;
 	int ret;
 
-	ret = snprintf(path, sizeof(path), "%s/%s%s", ZD_PATH_SYSTEM_APPS, app->name,
-		       ZD_APP_SUFFIX);
+	ret = snprintf(path, sizeof(path), "%s/%s%s", ZD_PATH_SYSTEM_ZAPPS, app->name,
+		       ZD_ZAPP_SUFFIX);
 	if (ret < 0 || ret >= (int)sizeof(path)) {
 		return -ENAMETOOLONG;
 	}

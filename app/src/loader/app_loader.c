@@ -20,10 +20,10 @@ LOG_MODULE_DECLARE(zd_main, CONFIG_ZD_LOG_LEVEL);
 static bool has_app_suffix(const char *name)
 {
 	size_t name_len = strlen(name);
-	size_t suffix_len = strlen(ZD_APP_SUFFIX);
+	size_t suffix_len = strlen(ZD_ZAPP_SUFFIX);
 
 	return name_len > suffix_len &&
-	       strcmp(name + name_len - suffix_len, ZD_APP_SUFFIX) == 0;
+	       strcmp(name + name_len - suffix_len, ZD_ZAPP_SUFFIX) == 0;
 }
 
 /* "hello.llext" -> "hello". Truncates rather than failing: the stem is a label
@@ -31,7 +31,7 @@ static bool has_app_suffix(const char *name)
  */
 static void stem_of(const char *filename, char *out, size_t out_len)
 {
-	size_t len = strlen(filename) - strlen(ZD_APP_SUFFIX);
+	size_t len = strlen(filename) - strlen(ZD_ZAPP_SUFFIX);
 
 	if (len >= out_len) {
 		len = out_len - 1;
@@ -96,12 +96,12 @@ int zd_apps_discover(const struct zd_session *session, struct zd_app_entry *out,
 		return -EINVAL;
 	}
 
-	ret = zd_session_path(session, ZD_DIR_SYSTEM_APPS, dir, sizeof(dir));
+	ret = zd_session_path(session, ZD_DIR_SYSTEM_ZAPPS, dir, sizeof(dir));
 	if (ret == 0) {
 		count = scan_dir(dir, true, out, max, (size_t)count);
 	}
 
-	ret = zd_session_path(session, ZD_DIR_USER_APPS, dir, sizeof(dir));
+	ret = zd_session_path(session, ZD_DIR_USER_ZAPPS, dir, sizeof(dir));
 	if (ret == 0) {
 		count = scan_dir(dir, false, out, max, (size_t)count);
 	}

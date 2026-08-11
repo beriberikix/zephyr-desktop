@@ -53,11 +53,11 @@ static void test_fs_scope(const struct zd_session *session)
 	check(zd_fs_resolve(session, "/somewhere/else", false, out, sizeof(out)) == -EACCES,
 	      "path outside every root is refused");
 
-	check(zd_fs_resolve(session, ZD_PATH_SYSTEM_APPS "/hello.llext", true, out,
+	check(zd_fs_resolve(session, ZD_PATH_SYSTEM_ZAPPS "/hello.llext", true, out,
 			    sizeof(out)) == -EACCES,
 	      "write to the read-only system root is refused");
 
-	check(zd_fs_resolve(session, ZD_PATH_SYSTEM_APPS "/hello.llext", false, out,
+	check(zd_fs_resolve(session, ZD_PATH_SYSTEM_ZAPPS "/hello.llext", false, out,
 			    sizeof(out)) == 0,
 	      "read from the system root is allowed");
 
