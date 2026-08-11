@@ -14,6 +14,11 @@ target_sources(app PRIVATE
   src/chrome/titlebar.c
   src/shell/desktop.c
   src/shell/taskbar.c
+  src/shell/launcher.c
+  src/host/session.c
+  src/host/storage.c
+  src/host/fs_shim.c
+  src/loader/app_loader.c
   src/wm/wm.c
   src/wm/client.c
   src/wm/stack.c

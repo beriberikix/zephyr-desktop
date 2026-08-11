@@ -1,8 +1,9 @@
 # zephyr-desktop MVP — design doc + task list
 
-> **Status: milestones A-D complete.** Workspace pinned, target strategy proven end to end,
+> **Status: milestones A-E complete.** Workspace pinned, target strategy proven end to end,
 > retro theme, taskbar, and a full stacking WM with drag, focus and deferred destruction
-> running on `qemu_cortex_a53`. Milestones E–H remain; see §7. Two findings from building A are folded in below, marked **[A]**.
+> running on `qemu_cortex_a53`, plus a FAT filesystem, session, path-scoping shim and a
+> launcher that lists apps found on disk. Milestones F–H remain; see §7. Two findings from building A are folded in below, marked **[A]**.
 
 ## Context
 
@@ -681,14 +682,31 @@ task 12, which is the part with real risk, landed at C and is verified here.
 lands at F task 24 where the launcher can spawn on demand. The single-cycle slab
 accounting is verified.
 
-### E — Filesystem and discovery *(demo: launcher menu listing files found on disk)*
-13. Ramdisk node in the board overlay; FAT mount table in `main.c`; auto-mkfs; create
-    `/system/apps`, `/system/share`, `/home/user`, `/home/user/apps`, `/tmp`.
-14. `host/session.c`: the single `zd_session`, `path_resolve`.
-15. `host/fs_shim.c`: normalize, reject `..`, root+mode check.
-16. `loader/app_loader.c` discovery half: scan both app dirs for `*.llext`.
-17. `shell/launcher.c`: click the launcher button → popup menu of discovered entries.
-    **Drop a dummy file in the seeded FS and watch it appear in the menu.**
+### E — Filesystem and discovery — **DONE**
+13. ✅ 2 MB `zephyr,ram-disk`, FAT, auto-format on first mount, full directory layout.
+14. ✅ `host/session.c` + `host/storage.c`.
+15. ✅ `host/fs_shim.c`.
+16. ✅ `loader/app_loader.c` discovery half.
+17. ✅ `shell/launcher.c`: Start menu listing discovered apps; picking one opens a window
+    named after it. Verified — the menu shows `hello` and `notes`, both read from the
+    filesystem, and the rescan happens on every open so dropping a file in changes what
+    the menu shows.
+
+**[E] Paths are not free-form.** FATFS requires a mount point of the form `/<VOLUME>:`,
+with the volume string generated from the devicetree `disk-name`, so the root is `/RAM:`
+under QEMU and would be an SD volume on hardware. §5's `/system/apps` and `/home/user`
+are therefore *relative to* `CONFIG_ZD_FS_ROOT`, not absolute. This costs nothing because
+apps never build paths themselves — they resolve directories through the session — which
+is precisely the indirection §5 already called for, now load-bearing rather than
+decorative.
+
+**[E] FAT needs long filenames.** Without `CONFIG_FS_FATFS_LFN`, FAT is limited to 8.3,
+which caps extensions at three characters — and every app binary ends in `.llext`. Set
+alongside `CONFIG_FS_FATFS_MAX_LFN=64`.
+
+**[E]** The two `.llext` files present at this milestone are placeholders written at boot,
+not valid ELF, and are never loaded. What is real is the path: opendir, readdir, suffix
+match, menu. Milestone F replaces them with a genuine build artifact.
 
 ### F — llext load/unload of hello world *(demo: the actual success criterion)*
 18. `include/zd/app_abi.h` — the full contract from §4.2. Write `docs/abi.md` alongside it.

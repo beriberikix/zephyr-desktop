@@ -18,6 +18,16 @@ config ZD_MAX_CLIENTS
 	  point: a window leak shows up immediately as slab exhaustion instead of
 	  as slow heap growth nobody notices.
 
+config ZD_FS_ROOT
+	string "Mount point of the app filesystem"
+	default "/RAM:"
+	help
+	  FATFS requires a mount point of the form "/<VOLUME>:", where VOLUME is
+	  generated from a devicetree disk-name. Under QEMU that is the RAM disk;
+	  an SD-backed board would use its own volume. Apps never see this value
+	  -- they resolve directories through the session -- so changing it per
+	  board costs nothing above the mount table.
+
 config ZD_MAX_WINDOWS_PER_APP
 	int "Maximum windows a single app instance may own"
 	default 4

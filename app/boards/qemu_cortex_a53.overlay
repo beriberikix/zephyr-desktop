@@ -9,3 +9,18 @@
 	width = <480>;
 	height = <272>;
 };
+
+/*
+ * 2 MB RAM disk backing the app filesystem. Blank at every boot, so the mount
+ * always formats -- FS_MOUNT_FLAG_NO_FORMAT is deliberately not set. On the
+ * mimxrt1060_evk this node is replaced by the board's zephyr,sdmmc-disk and
+ * nothing above the mount table changes.
+ */
+/ {
+	ramdisk0: ramdisk0 {
+		compatible = "zephyr,ram-disk";
+		disk-name = "RAM";
+		sector-size = <512>;
+		sector-count = <4096>;
+	};
+};
