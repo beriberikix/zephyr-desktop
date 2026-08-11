@@ -1,0 +1,8 @@
+# west-managed trees — this repo is the workspace topdir as well as the project
+# repo, so the upstream sources live here but are not ours to version.
+/.west/
+/zephyr/
+/modules/
+
+# build output
+/build*/

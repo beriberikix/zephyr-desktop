@@ -1,0 +1,33 @@
+# zephyr-desktop west manifest (T2 star topology).
+#
+# Zephyr is pinned to a `main` commit, NOT a release tag. This is deliberate and
+# load-bearing: the qemu_cortex_a53 display + pointer stack this project targets
+# (drivers/input/input_virtio.c, the `zephyr,touch = &virtio_input0` chosen node,
+# and the -device virtio-tablet-device wiring in board.cmake) landed 2026-06-15,
+# after the v4.4.1 tag of 2026-06-10. No release tag contains it.
+#
+# e201b84b is the commit this project's recon was verified against.
+
+manifest:
+  self:
+    path: manifest
+
+  remotes:
+    - name: upstream
+      url-base: https://github.com/zephyrproject-rtos
+
+  projects:
+    - name: zephyr
+      remote: upstream
+      revision: e201b84b04e4fab1844658e71da0b7e340f1cc82
+      import:
+        # Keep the workspace small. Add modules here as milestones need them:
+        # hal_nxp joins at milestone H for the mimxrt1060_evk.
+        name-allowlist:
+          - cmsis
+          - cmsis_6
+          - fatfs
+          - littlefs
+          - lvgl
+          - picolibc
+          - segger

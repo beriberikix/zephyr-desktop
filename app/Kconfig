@@ -1,0 +1,31 @@
+# zephyr-desktop configuration
+
+menu "zephyr-desktop"
+
+config ZD_TICK_MAX_MS
+	int "Upper bound on the desktop loop's sleep between LVGL ticks (ms)"
+	default 30
+	help
+	  lv_timer_handler() returns how long it is willing to sleep. Cap it so the
+	  deferred reap (which runs at the top of the loop, outside LVGL dispatch)
+	  cannot be starved by an idle UI.
+
+config ZD_MAX_CLIENTS
+	int "Maximum simultaneously open windows, desktop-wide"
+	default 8
+	help
+	  Clients come from a fixed slab rather than the heap. The bound is the
+	  point: a window leak shows up immediately as slab exhaustion instead of
+	  as slow heap growth nobody notices.
+
+config ZD_MAX_WINDOWS_PER_APP
+	int "Maximum windows a single app instance may own"
+	default 4
+
+module = ZD
+module-str = zephyr-desktop
+source "subsys/logging/Kconfig.template.log_config"
+
+endmenu
+
+source "Kconfig.zephyr"

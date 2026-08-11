@@ -1,0 +1,11 @@
+/*
+ * 480x272 is not arbitrary: it keeps LVGL's software renderer responsive under
+ * TCG (upstream's own lvgl demo overlay makes the same choice for the same
+ * reason), and it is exactly the panel size of the rk043fn66hs_ctg shield that
+ * the mimxrt1060_evk hardware milestone would use. Same geometry on both
+ * targets means the desktop layout never has to be re-tuned.
+ */
+&ramfb0 {
+	width = <480>;
+	height = <272>;
+};
