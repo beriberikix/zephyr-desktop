@@ -11,5 +11,9 @@ target_include_directories(app PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../include)
 target_sources(app PRIVATE
   src/main.c
   src/chrome/theme.c
+  src/chrome/titlebar.c
   src/shell/desktop.c
+  src/shell/taskbar.c
+  src/wm/wm.c
+  src/wm/client.c
 )

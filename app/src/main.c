@@ -15,10 +15,13 @@
 
 #include "chrome/theme.h"
 #include "shell/desktop.h"
+#include "shell/taskbar.h"
+#include "wm/wm.h"
 
 LOG_MODULE_REGISTER(zd_main, CONFIG_ZD_LOG_LEVEL);
 
 static struct zd_layers layers;
+static struct zd_wm wm;
 
 int main(void)
 {
@@ -32,6 +35,11 @@ int main(void)
 	lvgl_lock();
 	zd_theme_init();
 	zd_desktop_init(&layers);
+	zd_taskbar_init(layers.panel, NULL, NULL); /* launcher wired up at milestone E */
+	zd_wm_init(&wm, &layers);
+
+	/* Hardcoded until the loader can spawn windows on an app's behalf. */
+	zd_wm_window_create(&wm, "Hello", NULL);
 	lvgl_unlock();
 
 	display_blanking_off(display);
@@ -43,8 +51,8 @@ int main(void)
 		 * outside LVGL dispatch. Nothing is ever deleted from inside an
 		 * event callback -- see CLAUDE.md.
 		 */
-
 		lvgl_lock();
+		zd_wm_reap(&wm);
 		uint32_t sleep_ms = lv_timer_handler();
 		lvgl_unlock();
 

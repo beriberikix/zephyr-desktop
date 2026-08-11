@@ -116,16 +116,20 @@ def main():
     ap.add_argument("--click", action="append", default=[], dest="actions_click")
     ap.add_argument("--move", action="append", default=[], dest="actions_move")
     ap.add_argument("--drag", action="append", default=[], dest="actions_drag")
+    # press/release exist so a shot can be taken mid-gesture: pressed button
+    # states and half-finished drags are only observable while held.
+    ap.add_argument("--press", action="append", default=[], dest="actions_press")
+    ap.add_argument("--release", action="append_const", const="",
+                    default=[], dest="actions_release")
     args, _ = ap.parse_known_args()
 
     # Rebuild the action list in the order the flags actually appeared, which
     # argparse discards.
-    order = []
-    for tok in sys.argv[1:]:
-        if tok in ("--shot", "--click", "--move", "--drag"):
-            order.append(tok[2:])
+    known = ("--shot", "--click", "--move", "--drag", "--press", "--release")
+    order = [tok[2:] for tok in sys.argv[1:] if tok in known]
     queues = {"shot": list(args.actions_shot), "click": list(args.actions_click),
-              "move": list(args.actions_move), "drag": list(args.actions_drag)}
+              "move": list(args.actions_move), "drag": list(args.actions_drag),
+              "press": list(args.actions_press), "release": list(args.actions_release)}
     actions = [(kind, queues[kind].pop(0)) for kind in order]
     if not actions:
         actions = [("shot", "frame")]
@@ -158,6 +162,14 @@ def main():
                 time.sleep(0.25)
                 q.button(False)
                 time.sleep(0.6)
+            elif kind == "press":
+                q.move(*point(arg))
+                time.sleep(0.3)
+                q.button(True)
+                time.sleep(0.5)
+            elif kind == "release":
+                q.button(False)
+                time.sleep(0.5)
             elif kind == "drag":
                 src, dst = arg.split(":")
                 sx, sy = point(src)

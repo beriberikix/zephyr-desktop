@@ -29,8 +29,9 @@
 #define ZD_BEVEL_W 2
 
 typedef enum {
-	ZD_BEVEL_OUT, /**< raised: light top-left, dark bottom-right */
-	ZD_BEVEL_IN,  /**< sunken: the reverse */
+	ZD_BEVEL_OUT,    /**< raised: light top-left, dark bottom-right */
+	ZD_BEVEL_IN,     /**< sunken: the reverse */
+	ZD_BEVEL_BUTTON, /**< raised, but sunken while LV_STATE_PRESSED */
 } zd_bevel_t;
 
 /** Build the shared styles. Call once, before any chrome is created. */

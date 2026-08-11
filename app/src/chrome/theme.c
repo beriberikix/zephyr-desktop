@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 #include "theme.h"
+#include "titlebar.h"
 
 lv_style_t zd_style_face;
 
@@ -96,6 +97,14 @@ static void bevel_draw_cb(lv_event_t *e)
 	inner.x2 = outer.x2 - 1;
 	inner.y2 = outer.y2 - 1;
 
+	if (kind == ZD_BEVEL_BUTTON) {
+		/* Reading the state here rather than swapping the callback keeps
+		 * press feedback a pure function of LVGL state -- nothing to keep
+		 * in sync, and nothing to leak if the object dies mid-press.
+		 */
+		kind = (lv_obj_get_state(obj) & LV_STATE_PRESSED) ? ZD_BEVEL_IN : ZD_BEVEL_OUT;
+	}
+
 	if (kind == ZD_BEVEL_OUT) {
 		draw_ring(layer, &outer, ZD_C_LIGHT, ZD_C_DARK);
 		draw_ring(layer, &inner, ZD_C_FACE_LIGHT, ZD_C_SHADOW);
@@ -105,10 +114,25 @@ static void bevel_draw_cb(lv_event_t *e)
 	}
 }
 
+/* LVGL only invalidates on a state change when some *style* property depends on
+ * that state. A bevel drawn in DRAW_POST is invisible to that check, so a press
+ * would flip the state and never repaint. Ask for the redraw explicitly.
+ */
+static void bevel_state_cb(lv_event_t *e)
+{
+	lv_obj_invalidate(lv_event_get_target_obj(e));
+}
+
 void zd_bevel_attach(lv_obj_t *obj, zd_bevel_t kind)
 {
 	lv_obj_add_event_cb(obj, bevel_draw_cb, LV_EVENT_DRAW_POST,
 			    (void *)(uintptr_t)kind);
+
+	if (kind == ZD_BEVEL_BUTTON) {
+		lv_obj_add_event_cb(obj, bevel_state_cb, LV_EVENT_PRESSED, NULL);
+		lv_obj_add_event_cb(obj, bevel_state_cb, LV_EVENT_RELEASED, NULL);
+		lv_obj_add_event_cb(obj, bevel_state_cb, LV_EVENT_PRESS_LOST, NULL);
+	}
 }
 
 /* --- styles ---------------------------------------------------------------- */
@@ -131,4 +155,6 @@ void zd_theme_init(void)
 	lv_style_set_pad_all(&zd_style_face, 0);
 	lv_style_set_text_color(&zd_style_face, lv_color_hex(ZD_C_TEXT));
 	lv_style_set_text_font(&zd_style_face, &lv_font_montserrat_12);
+
+	zd_titlebar_styles_init();
 }
