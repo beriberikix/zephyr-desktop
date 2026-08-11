@@ -19,6 +19,13 @@
  * Once apps are built out-of-tree against the llext EDK, this is replaced by
  * QEMU's fw_cfg channel and the desktop image stops needing a rebuild per app.
  */
+#ifdef CONFIG_ZD_SEED_BUILTIN_APPS
 int zd_seed_install(void);
+#else
+static inline int zd_seed_install(void)
+{
+	return 0;
+}
+#endif
 
 #endif /* ZD_LOADER_SEED_H_ */

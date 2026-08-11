@@ -32,6 +32,31 @@ config ZD_MAX_WINDOWS_PER_APP
 	int "Maximum windows a single app instance may own"
 	default 4
 
+config ZD_FS_AUTOFORMAT
+	bool "Format the app volume if it has no filesystem"
+	default y
+	help
+	  Enforced with FS_MOUNT_FLAG_NO_FORMAT on the mount, NOT via Kconfig:
+	  FS_FATFS_MOUNT_MKFS defaults to y and *selects* FS_FATFS_MKFS, so
+	  setting either to n in a board fragment is silently overridden. The
+	  mount flag is the only thing fat_fs.c actually checks.
+
+	  Right for a RAM disk that is blank at every boot. Wrong for removable
+	  media, where a failed mount means "unreadable card", not "please
+	  destroy it".
+
+config ZD_SEED_BUILTIN_APPS
+	bool "Install the built-in apps into /system/apps at boot"
+	default y
+	help
+	  Writes the .llext files embedded in the image to the filesystem if they
+	  are absent. This is a stand-in for an installer on targets whose storage
+	  is blank at every boot, such as the QEMU RAM disk.
+
+	  Turn it off where storage persists and apps arrive by other means -- on
+	  hardware with an SD card, seeding would defeat the point of checking
+	  that a .llext can arrive as a genuinely external file.
+
 config ZD_SELFTEST
 	bool "Run the permission and handle checks at boot"
 	default y

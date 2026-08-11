@@ -1,0 +1,35 @@
+/*
+ * mimxrt1060_evk — headless hardware checkpoint.
+ *
+ * No panel is attached yet, so the desktop runs against a dummy display
+ * controller: the WM, the loader and the filesystem are all exercised on real
+ * Cortex-M7 silicon, and only the pixels are absent. LVGL still renders into a
+ * buffer, so this is a genuine run, not a compile check.
+ *
+ * With an rk043fn66hs_ctg attached this file's dummy node is deleted and the
+ * shield supplies `zephyr,display` (eLCDIF, 480x272 -- the same geometry the
+ * QEMU target already uses) plus a GT911 as `zephyr,touch`. Nothing above the
+ * board layer changes.
+ */
+
+/ {
+	chosen {
+		zephyr,display = &dummy_dc;
+	};
+
+	dummy_dc: dummy_dc {
+		compatible = "zephyr,dummy-dc";
+		status = "okay";
+		height = <272>;
+		width = <480>;
+	};
+};
+
+/* The SD card is the app store on hardware: /SD:/system/apps/*.llext are real
+ * files that arrived without the desktop image being rebuilt. `disk-name` is
+ * already "SD" in the board dtsi, which is what makes the FATFS mount point
+ * "/SD:" -- see CONFIG_ZD_FS_ROOT.
+ */
+&usdhc1 {
+	status = "okay";
+};

@@ -1,11 +1,13 @@
 # zephyr-desktop MVP — design doc + task list
 
-> **Status: milestones A-G complete — the MVP's full success criterion is met.** Workspace pinned, target strategy proven end to end,
+> **Status: MVP complete.** Milestones A-G are done and verified on `qemu_cortex_a53`;
+> milestone H builds and is documented, with the on-board run left for you (see
+> `docs/hardware.md`) since it needs the EVK in hand. Workspace pinned, target strategy proven end to end,
 > retro theme, taskbar, and a full stacking WM with drag, focus and deferred destruction
 > running on `qemu_cortex_a53`, plus a FAT filesystem, session, path-scoping shim and a
 > launcher that lists apps found on disk, and a real .llext app loaded at runtime that
 > opens a window and draws "hello world", two live instances of it, and a one-symbol
-> export surface. Only milestone H (hardware) remains; see §7. Two findings from building A are folded in below, marked **[A]**.
+> export surface. See §7 for what each milestone actually produced. Two findings from building A are folded in below, marked **[A]**.
 
 ## Context
 
@@ -781,15 +783,26 @@ so the `.obj` recompiles and the `.llext` stays stale — an app edit ships the 
 binary silently. This invalidated one verification run before it was caught.
 `app/CMakeLists.txt` re-attaches the dependency to the documented `pkg_input` property.
 
-### H — Hardware checkpoint, headless *(demo: same binary spine on a Cortex-M7)*
-28. `mimxrt1060_evk` board conf/overlay: `CONFIG_DUMMY_DISPLAY` + `zephyr,dummy-dc`,
-    FAT on SD via `zephyr,sdmmc-disk`.
-29. Copy `hello.llext` onto an SD card by hand — the first time a `.llext` arrives as a
-    genuinely external file.
-30. Boot, verify discovery + load + window-create + unload over the console log. Record
-    RAM/flash cost and `llext` heap high-water. **Panel purchase decision point:** with an
-    `rk043fn66hs_ctg`, this milestone becomes the graphical desktop at the same 480×272,
-    and `CONFIG_LV_USE_PXP=y` becomes a one-line accel experiment.
+### H — Hardware checkpoint, headless — **BUILDS; on-board run pending the EVK**
+28. ✅ `hal_nxp` added to the manifest; `app/boards/mimxrt1060_evk_mimxrt1062_qspi.{conf,overlay}`
+    with a dummy display at 480×272, FAT on SD (`/SD:`), no seeding, no auto-format.
+    **Builds clean: FLASH 324 KB, RAM 284 KB.** All three extensions build as
+    32-bit ARM EABI5 relocatables (vs aarch64 for QEMU), `LLEXT_TYPE_ELF_OBJECT`,
+    `ARCH_HAS_USERSPACE=y`, and the export surface is 1 symbol here too.
+29. ⏸ Requires the board. `docs/hardware.md` is the runbook.
+30. ⏸ Requires the board.
+
+**[H] A Kconfig `=n` in a board fragment can be silently overridden.** The board conf set
+`CONFIG_FS_FATFS_MKFS=n` to stop a failed mount from formatting the user's SD card, and
+the resolved `.config` still read `y`: `FS_FATFS_MOUNT_MKFS` defaults to `y` and
+**selects** it. The comment claimed a protection that did not exist. The real control is
+the `FS_MOUNT_FLAG_NO_FORMAT` mount flag — the only thing `fat_fs.c:471` actually checks —
+now driven by `CONFIG_ZD_FS_AUTOFORMAT`. Worth generalising: after setting a Kconfig
+symbol that matters, read it back out of the resolved `.config`.
+
+**[H]** Seeding built-in apps is now `CONFIG_ZD_SEED_BUILTIN_APPS`, off on hardware. The
+point of the checkpoint is that a `.llext` arrives from outside, so the desktop must find
+apps it did not write itself.
 
 ---
 

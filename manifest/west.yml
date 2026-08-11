@@ -21,12 +21,12 @@ manifest:
       remote: upstream
       revision: e201b84b04e4fab1844658e71da0b7e340f1cc82
       import:
-        # Keep the workspace small. Add modules here as milestones need them:
-        # hal_nxp joins at milestone H for the mimxrt1060_evk.
+        # Keep the workspace small; add modules as milestones need them.
         name-allowlist:
           - cmsis
           - cmsis_6
           - fatfs
+          - hal_nxp   # milestone H: mimxrt1060_evk
           - littlefs
           - lvgl
           - picolibc

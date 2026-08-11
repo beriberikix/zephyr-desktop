@@ -24,6 +24,14 @@ static struct fs_mount_t mount_point = {
 	.type = FS_FATFS,
 	.fs_data = &fat_fs,
 	.mnt_point = ZD_FS_ROOT,
+#ifndef CONFIG_ZD_FS_AUTOFORMAT
+	/* fat_fs.c formats on FR_NO_FILESYSTEM unless this flag is set, and it
+	 * is the ONLY check it makes. Kconfig is no defence here:
+	 * FS_FATFS_MOUNT_MKFS defaults to y and selects FS_FATFS_MKFS, so a
+	 * board fragment setting them to n is silently overridden.
+	 */
+	.flags = FS_MOUNT_FLAG_NO_FORMAT,
+#endif
 };
 
 static int ensure_dir(const char *path)
@@ -53,12 +61,13 @@ int zd_storage_init(void)
 	};
 	int ret;
 
-	/* A RAM disk is blank at every boot, so the first mount always has to
-	 * format. FS_MOUNT_FLAG_NO_FORMAT is deliberately not set.
-	 */
 	ret = fs_mount(&mount_point);
 	if (ret != 0) {
 		LOG_ERR("mount %s failed (%d)", ZD_FS_ROOT, ret);
+		if (!IS_ENABLED(CONFIG_ZD_FS_AUTOFORMAT)) {
+			LOG_ERR("auto-format is off; the volume must already hold a "
+				"FAT filesystem");
+		}
 		return ret;
 	}
 

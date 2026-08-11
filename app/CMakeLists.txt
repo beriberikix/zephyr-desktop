@@ -24,7 +24,6 @@ target_sources(app PRIVATE
   src/host/host_api.c
   src/loader/app_loader.c
   src/loader/app_instance.c
-  src/loader/seed.c
   src/wm/wm.c
   src/wm/client.c
   src/wm/stack.c
@@ -34,6 +33,7 @@ target_sources(app PRIVATE
 )
 
 target_sources_ifdef(CONFIG_ZD_SELFTEST app PRIVATE src/selftest.c)
+target_sources_ifdef(CONFIG_ZD_SEED_BUILTIN_APPS app PRIVATE src/loader/seed.c)
 
 # --- apps ---------------------------------------------------------------------
 #
