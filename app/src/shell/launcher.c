@@ -68,6 +68,7 @@ static lv_obj_t *add_item(int index, const char *text, bool enabled)
 
 	if (enabled) {
 		lv_obj_add_flag(item, LV_OBJ_FLAG_CLICKABLE);
+		lv_obj_set_ext_click_area(item, CONFIG_ZD_TOUCH_SLOP_PX);
 		lv_obj_add_event_cb(item, item_clicked, LV_EVENT_CLICKED,
 				    (void *)(intptr_t)index);
 	}

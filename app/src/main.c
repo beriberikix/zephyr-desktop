@@ -49,6 +49,31 @@ static void on_app_chosen(const struct zd_zapp_entry *entry, void *user_data)
 	(void)zd_zapp_launch(entry);
 }
 
+/* Diagnostics for the input path, which is otherwise silent when it fails. */
+static void report_pointer(void)
+{
+#if DT_HAS_CHOSEN(zephyr_touch)
+	const struct device *touch = DEVICE_DT_GET(DT_CHOSEN(zephyr_touch));
+
+	LOG_INF("touch device %s: %s", touch->name,
+		device_is_ready(touch) ? "ready" : "NOT READY");
+#else
+	LOG_WRN("no zephyr,touch chosen -- nothing will be clickable");
+#endif
+
+	lv_indev_t *indev = lv_indev_get_next(NULL);
+	unsigned int pointers = 0;
+
+	while (indev != NULL) {
+		if (lv_indev_get_type(indev) == LV_INDEV_TYPE_POINTER) {
+			pointers++;
+		}
+		indev = lv_indev_get_next(indev);
+	}
+
+	LOG_INF("LVGL pointer input devices: %u", pointers);
+}
+
 int main(void)
 {
 	const struct device *display = DEVICE_DT_GET(DT_CHOSEN(zephyr_display));
@@ -86,6 +111,12 @@ int main(void)
 	lvgl_unlock();
 
 	display_blanking_off(display);
+
+	/* Say out loud whether there is anything to click with. A desktop whose
+	 * pointer never initialised looks identical to one whose window manager
+	 * is broken, and the difference is three lines of logging.
+	 */
+	report_pointer();
 
 	LOG_INF("zephyr-desktop up on %s", display->name);
 

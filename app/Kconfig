@@ -75,6 +75,31 @@ config ZD_ZAPP_LOAD_VIA_BUFFER
 	  Discovery is unaffected either way: the .llext is still a real file the
 	  desktop found on a real filesystem.
 
+config ZD_TOUCH_SLOP_PX
+	int "Extra pixels of hit area around small controls"
+	default 0
+	help
+	  Win95 chrome is mouse-sized: the launcher button is 20 px tall at the
+	  very bottom of the screen, and the window close box is 14x14. A cursor
+	  hits those exactly; a fingertip does not.
+
+	  This expands the *clickable* area of the small controls without moving
+	  or redrawing anything, so the retro geometry is preserved pixel for
+	  pixel and only the hit test grows. Leave at 0 for pointer-driven
+	  targets; set it to roughly half a fingertip on touch panels.
+
+config ZD_TOUCH_PROBE
+	bool "Poll the touch controller directly and log every result"
+	depends on I2C
+	help
+	  Debug aid for a touch panel that is present on I2C but produces no
+	  input events. The touch driver returns silently on an I2C error, so
+	  "no events" and "every read failed" look identical from outside. This
+	  reads the controller's touch-count register from a thread of our own
+	  and reports errors and counts, which tells the two apart.
+
+	  Off by default; it duplicates the driver's own bus traffic.
+
 config ZD_SELFTEST
 	bool "Run the permission and handle checks at boot"
 	default y

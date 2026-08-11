@@ -59,6 +59,8 @@ void zd_client_build(struct zd_client *client, lv_obj_t *parent)
 	lv_obj_add_flag(client->close_btn, LV_OBJ_FLAG_CLICKABLE);
 	zd_bevel_attach(client->close_btn, ZD_BEVEL_BUTTON);
 	zd_close_glyph_attach(client->close_btn);
+	/* 14x14 is a mouse-sized target; a fingertip needs help. */
+	lv_obj_set_ext_click_area(client->close_btn, CONFIG_ZD_TOUCH_SLOP_PX);
 
 	/* Content area: where a zapp's widgets go. Sunken, like a Win95 client
 	 * area, and white so text drawn by a zapp reads.

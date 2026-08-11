@@ -83,6 +83,8 @@ void zd_taskbar_init(lv_obj_t *panel, zd_launcher_cb_t cb, void *cb_arg)
 	lv_obj_set_size(launcher_btn, LAUNCHER_W, ITEM_H);
 	lv_obj_set_pos(launcher_btn, EDGE_PAD, ITEM_Y);
 	zd_bevel_attach(launcher_btn, ZD_BEVEL_BUTTON);
+	/* Grow the hit target without moving the pixels -- see ZD_TOUCH_SLOP_PX. */
+	lv_obj_set_ext_click_area(launcher_btn, CONFIG_ZD_TOUCH_SLOP_PX);
 	lv_obj_add_event_cb(launcher_btn, launcher_event, LV_EVENT_CLICKED, NULL);
 
 	label = lv_label_create(launcher_btn);

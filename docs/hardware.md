@@ -208,9 +208,65 @@ reaches y=212, exactly the taskbar edge — so with several zapps open, later
 windows are partly hidden behind the taskbar. Cosmetic, not broken, and the drag
 clamp reads the screen size at runtime so windows can always be pulled back.
 
-## Not yet run on hardware
+## Touch: two things had to be fixed
 
-Everything above is a build-and-reasoning result. The load path in particular --
-buffer loader, Harvard heaps, shared-object extensions -- has not been executed
-on silicon. Watch the console for `mounted /SD:`, `discovered N zapp(s)`, then
-`llext: Loaded extension hello` and `[Hello] hello world, Zephyr!`.
+Both were found on the device, and the second is not board-specific.
+
+**1. Mouse-sized targets.** A tap aimed at the Start button measures `x≈39,
+y=239`; the button's drawn bounds are `x 3..61, y 216..236`. The x is dead on
+and the y misses low every time -- a 20 px control at the very bottom edge of a
+240 px screen is not reachable with a fingertip, and the panel edge is where
+accuracy is worst. `CONFIG_ZD_TOUCH_SLOP_PX=12` grows the *hit area* of the
+launcher button, window close boxes and menu items via
+`lv_obj_set_ext_click_area()`. No drawn pixel moves; the chrome stays exact.
+Defaults to 0, so pointer-driven targets are unaffected.
+
+**2. The system workqueue stack, which is the real one.** The touch driver's
+work runs on the system workqueue, whose stack defaults to **1 KB**. With
+`CONFIG_LOG_MODE_IMMEDIATE=y` -- which this project sets so that boot-time
+selftest results cannot be dropped -- every `LOG_DBG` formats and writes to the
+console *synchronously on the caller's stack*. Four log lines per touch event
+overflowed that 1 KB and corrupted memory.
+
+The fault then surfaced in `main()`:
+
+```
+ft5336_process: points: 1, row: 33, col: 239
+input_report x3
+** FATAL EXCEPTION ... EXCCAUSE 28 (load prohibited) ... VADDR 0x1c
+0x42002d8b: zd_wm_reap at app/src/wm/wm.c:174
+```
+
+`wm.c:174` is `wm->in_zapp_callback`, and `in_zapp_callback` sits at offset
+`0x1c` in `struct zd_wm` -- a null `wm`, passed by a `main()` that passes
+`&wm`, a static. An impossible frame, which is the signature of a smashed
+stack rather than a logic bug. Nothing reported it because neither
+`HW_STACK_PROTECTION` nor `STACK_SENTINEL` was enabled.
+
+`prj.conf` now sets `CONFIG_SYSTEM_WORKQUEUE_STACK_SIZE=4096`,
+`CONFIG_STACK_SENTINEL=y` and `CONFIG_THREAD_NAME=y`. The lesson generalises:
+**immediate-mode logging makes every logging thread's stack requirement the
+formatter's, including the 1 KB ones you never sized yourself.**
+
+Verified after the fix: six launcher clicks, thirteen samples with proper
+press/release bursts, zero faults.
+
+## What has and has not run on hardware
+
+**Confirmed on the device:** boot, the ili9342c display, the full 15-check
+selftest on Xtensa, the FT6336 touch panel, and the launcher opening on tap.
+
+**Not yet exercised:** everything downstream of the SD card. The mount fails --
+
+```
+sd: Card does not support CMD8, assuming legacy card
+fs: fs mount error (-5)
+mount /SD: failed (-5)
+auto-format is off; the volume must already hold a FAT filesystem
+```
+
+-- so `discovered 0 zapp(s)`, and the buffer loader, Harvard llext heaps and
+Xtensa shared-object relocation remain untested on silicon. Insert a
+FAT-formatted card with the layout above and watch for `mounted /SD:`,
+`discovered N zapp(s)`, `llext: Loaded extension hello`, then
+`[Hello] hello world, Zephyr!`.

@@ -33,6 +33,7 @@ target_sources(app PRIVATE
 )
 
 target_sources_ifdef(CONFIG_ZD_SELFTEST app PRIVATE src/selftest.c)
+target_sources_ifdef(CONFIG_ZD_TOUCH_PROBE app PRIVATE src/touch_probe.c)
 target_sources_ifdef(CONFIG_ZD_SEED_BUILTIN_ZAPPS app PRIVATE src/loader/seed.c)
 
 # --- zapps --------------------------------------------------------------------
