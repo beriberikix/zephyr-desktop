@@ -1,0 +1,21 @@
+/*
+ * A RAM disk alongside the SD card.
+ *
+ * Unused by the default build (CONFIG_DISK_DRIVER_RAM=n there): the point of
+ * this target is that zapps arrive on removable media. But the SD slot does not
+ * currently enumerate -- the card never answers CMD8 or returns an OCR -- and
+ * that blocks testing everything downstream of it: the buffer loader, the
+ * Harvard llext heaps, and Xtensa shared-object relocation.
+ *
+ * Building with app/boards/cores3-ramdisk.conf switches the filesystem to this
+ * node and seeds the built-in zapps into it, exactly as the QEMU target does,
+ * so the loader can be proven on Xtensa independently of the SD problem.
+ */
+/ {
+	ramdisk0: ramdisk0 {
+		compatible = "zephyr,ram-disk";
+		disk-name = "RAM";
+		sector-size = <512>;
+		sector-count = <160>;  /* 80 KB: three zapps are ~5 KB total, and ESP32-S3 DRAM is tight */
+	};
+};

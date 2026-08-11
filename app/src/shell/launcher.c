@@ -15,8 +15,20 @@
 
 LOG_MODULE_DECLARE(zd_main, CONFIG_ZD_LOG_LEVEL);
 
-#define MENU_W        140
-#define ITEM_H        18
+#define MENU_W 140
+
+/*
+ * Menu rows grow on touch targets instead of getting hit-area slop.
+ *
+ * ext_click_area is right for an isolated control -- the Start button, a close
+ * box -- where the space around it is dead. It is wrong for a contiguous list:
+ * expanding every row by 12 px made all three overlap, and because LVGL awards
+ * an overlap to the last-added child, every tap anywhere in the menu landed on
+ * the bottom entry. The top entry was effectively unreachable.
+ *
+ * A list needs bigger rows, not bigger hit boxes.
+ */
+#define ITEM_H (18 + CONFIG_ZD_TOUCH_SLOP_PX)
 #define MENU_PAD      4
 #define EMPTY_ITEM_H  20
 
@@ -68,7 +80,6 @@ static lv_obj_t *add_item(int index, const char *text, bool enabled)
 
 	if (enabled) {
 		lv_obj_add_flag(item, LV_OBJ_FLAG_CLICKABLE);
-		lv_obj_set_ext_click_area(item, CONFIG_ZD_TOUCH_SLOP_PX);
 		lv_obj_add_event_cb(item, item_clicked, LV_EVENT_CLICKED,
 				    (void *)(intptr_t)index);
 	}
