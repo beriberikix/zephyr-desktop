@@ -271,9 +271,9 @@ does not work at all. In the board DTS, `mipi_dbi` has
 and never lets go, so the card can never drive a reply:
 
 ```
-sd: Card does not support CMD8, assuming legacy card
-sd: No OCR
-fs: fs mount error (-5)
+<inf> sd: Card does not support CMD8, assuming legacy card
+<dbg> sd.sdmmc_spi_send_ocr: No OCR detected
+<err> fs: fs mount error (-5)
 ```
 
 Two different cards, identical failure. It is a hardware fact, not a
