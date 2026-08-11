@@ -26,6 +26,7 @@ manifest:
           - cmsis
           - cmsis_6
           - fatfs
+          - hal_espressif # m5stack_cores3 (ESP32-S3)
           - hal_nxp   # milestone H: mimxrt1060_evk
           - littlefs
           - lvgl

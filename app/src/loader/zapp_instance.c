@@ -10,6 +10,8 @@
 #include <string.h>
 
 #include <zephyr/kernel.h>
+#include <zephyr/fs/fs.h>
+#include <zephyr/llext/buf_loader.h>
 #include <zephyr/llext/fs_loader.h>
 #include <zephyr/llext/llext.h>
 #include <zephyr/logging/log.h>
@@ -24,7 +26,10 @@ LOG_MODULE_DECLARE(zd_main, CONFIG_ZD_LOG_LEVEL);
 
 struct instance_slot {
 	struct zd_zapp_instance inst;
-	struct llext_fs_loader fs_loader;
+	union {
+		struct llext_fs_loader fs;
+		struct llext_buf_loader buf;
+	} loader;
 };
 
 static struct instance_slot slots[MAX_INSTANCES];
@@ -79,6 +84,81 @@ static int validate_manifest(const struct zd_zapp_manifest *manifest, const char
 	return 0;
 }
 
+#ifdef CONFIG_ZD_ZAPP_LOAD_VIA_BUFFER
+/*
+ * Slurp the whole ELF into RAM so a peek()-capable loader can be used.
+ *
+ * llext may modify this buffer in place while linking, and requires it to stay
+ * allocated for as long as the zapp is loaded -- so it is owned by the instance
+ * and freed in unwind_image(), not here.
+ */
+static int read_whole_file(const char *path, void **out, size_t *out_len)
+{
+	struct fs_dirent entry;
+	struct fs_file_t file;
+	void *buf;
+	ssize_t got;
+	int ret;
+
+	ret = fs_stat(path, &entry);
+	if (ret != 0) {
+		return ret;
+	}
+
+	buf = k_malloc(entry.size);
+	if (buf == NULL) {
+		LOG_ERR("no room for a %zu-byte zapp image", entry.size);
+		return -ENOMEM;
+	}
+
+	fs_file_t_init(&file);
+	ret = fs_open(&file, path, FS_O_READ);
+	if (ret != 0) {
+		k_free(buf);
+		return ret;
+	}
+
+	got = fs_read(&file, buf, entry.size);
+	fs_close(&file);
+
+	if (got < 0 || (size_t)got != entry.size) {
+		LOG_ERR("short read on %s (%zd of %zu)", path, got, entry.size);
+		k_free(buf);
+		return -EIO;
+	}
+
+	*out = buf;
+	*out_len = entry.size;
+	return 0;
+}
+#endif /* CONFIG_ZD_ZAPP_LOAD_VIA_BUFFER */
+
+/* Point the instance at whichever loader this target can actually use. */
+static int open_loader(struct instance_slot *slot, const struct zd_zapp_entry *entry)
+{
+#ifdef CONFIG_ZD_ZAPP_LOAD_VIA_BUFFER
+	struct zd_zapp_instance *inst = &slot->inst;
+	int ret = read_whole_file(entry->path, &inst->elf_buf, &inst->elf_size);
+
+	if (ret != 0) {
+		return ret;
+	}
+
+	/* LLEXT_BUF_LOADER picks WRITABLE or PERSISTENT storage from
+	 * CONFIG_LLEXT_STORAGE_WRITABLE, which is exactly the distinction that
+	 * forced this path in the first place.
+	 */
+	slot->loader.buf = (struct llext_buf_loader)
+		LLEXT_BUF_LOADER(inst->elf_buf, inst->elf_size);
+	inst->loader = &slot->loader.buf.loader;
+	return 0;
+#else
+	slot->loader.fs = (struct llext_fs_loader)LLEXT_FS_LOADER(entry->path);
+	slot->inst.loader = &slot->loader.fs.loader;
+	return 0;
+#endif
+}
+
 /* Drop this instance's reference to the image, running .fini_array only if we
  * are the last holder. Shared with the failure paths in zd_zapp_launch().
  */
@@ -94,6 +174,15 @@ static void unwind_image(struct zd_zapp_instance *inst)
 
 	llext_unload(&inst->ext);
 	inst->ext = NULL;
+
+	/* Safe only now: llext may have been referencing straight into this
+	 * buffer for the whole life of the zapp.
+	 */
+	if (inst->elf_buf != NULL) {
+		k_free(inst->elf_buf);
+		inst->elf_buf = NULL;
+		inst->elf_size = 0;
+	}
 }
 
 int zd_zapp_launch(const struct zd_zapp_entry *entry)
@@ -112,9 +201,13 @@ int zd_zapp_launch(const struct zd_zapp_entry *entry)
 
 	inst = &slot->inst;
 	memset(inst, 0, sizeof(*inst));
-	slot->fs_loader = (struct llext_fs_loader)LLEXT_FS_LOADER(entry->path);
 
-	inst->loader = &slot->fs_loader.loader;
+	ret = open_loader(slot, entry);
+	if (ret != 0) {
+		LOG_ERR("cannot open '%s' (%d)", entry->path, ret);
+		return ret;
+	}
+
 	inst->session = loader_session;
 	inst->wm = loader_wm;
 	inst->ctx.inst = inst;
@@ -132,6 +225,8 @@ int zd_zapp_launch(const struct zd_zapp_entry *entry)
 	ret = llext_load(inst->loader, entry->name, &inst->ext, &param);
 	if (ret < 0) {
 		LOG_ERR("llext_load('%s') failed (%d)", entry->path, ret);
+		k_free(inst->elf_buf);
+		inst->elf_buf = NULL;
 		return ret;
 	}
 
@@ -143,6 +238,8 @@ int zd_zapp_launch(const struct zd_zapp_entry *entry)
 		if (ret != 0) {
 			LOG_ERR("llext_bringup('%s') failed (%d)", entry->name, ret);
 			llext_unload(&inst->ext);
+			k_free(inst->elf_buf);
+			inst->elf_buf = NULL;
 			return ret;
 		}
 	} else {

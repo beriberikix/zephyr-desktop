@@ -805,6 +805,15 @@ the `FS_MOUNT_FLAG_NO_FORMAT` mount flag — the only thing `fat_fs.c:471` actua
 now driven by `CONFIG_ZD_FS_AUTOFORMAT`. Worth generalising: after setting a Kconfig
 symbol that matters, read it back out of the resolved `.config`.
 
+**[H] Second architecture: M5Stack CoreS3** (`m5stack_cores3/esp32s3/procpu`),
+added after the MVP. Xtensa forced the one genuine design change of the whole
+port: zapps cannot be streamed off the card, because writable llext storage is
+mandatory there and `llext_fs_loader` has no `peek()`. `ZD_ZAPP_LOAD_VIA_BUFFER`
+reads the image into RAM and uses `llext_buf_loader` instead. That the change is
+confined to `open_loader()` in `zapp_instance.c` -- with discovery, the ABI, the
+WM and the shim untouched -- is the strongest evidence so far that the layering
+holds. Details in `docs/hardware.md`.
+
 **[H]** Seeding built-in zapps is now `CONFIG_ZD_SEED_BUILTIN_ZAPPS`, off on hardware. The
 point of the checkpoint is that a `.llext` arrives from outside, so the desktop must find
 zapps it did not write itself.

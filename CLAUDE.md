@@ -39,8 +39,15 @@ with `CONFIG_LLEXT=y` and then fails every `llext_load()` at runtime. Do not rei
 it "just for iteration" — that forks the zapp model, which is the one thing this project
 must not do.
 
-Hardware target for later (milestone H): `mimxrt1060_evk`, headless at first (no panel
-yet), FAT on SD. `CONFIG_LV_USE_PXP` is the eventual 2D-accel experiment.
+Hardware targets, both building but not yet run on silicon:
+
+- `mimxrt1060_evk/mimxrt1062/qspi` — headless (no panel yet), FAT on SD.
+  `CONFIG_LV_USE_PXP` is the eventual 2D-accel experiment.
+- `m5stack_cores3/esp32s3/procpu` — 320x240 touchscreen, SD, and the only
+  **non-ARM** target. Xtensa cannot stream zapps off the filesystem: it needs
+  writable llext storage, which needs a `peek()`-capable loader, and
+  `llext_fs_loader` has none. Hence `CONFIG_ZD_ZAPP_LOAD_VIA_BUFFER`. Also
+  Harvard, so `LLEXT_HEAP_SIZE` does not exist there. See `docs/hardware.md`.
 
 ## Zephyr version
 

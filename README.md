@@ -6,7 +6,7 @@ launcher and clock, and **zapps as `.llext` extensions discovered on a filesyste
 and loaded at runtime**.
 
 It runs on `qemu_cortex_a53` — natively on macOS, in a real window, with a real
-mouse.
+mouse — and builds for the MIMXRT1060-EVK and the M5Stack CoreS3.
 
 ```
 +--------------------------------------------------+
@@ -33,8 +33,10 @@ Verified over 20 consecutive launch/close cycles: 20 loads, 20 unloads, zero
 errors, and after every one — 0 windows live, 8 slab blocks free, 0 zapps live,
 0 handles live.
 
-`mimxrt1060_evk` builds (FLASH 324 KB, RAM 284 KB) but has not been run on
-hardware yet; see [docs/hardware.md](docs/hardware.md).
+Two hardware targets build but have not been run on silicon yet — the
+`mimxrt1060_evk` (324 KB flash, headless) and the **M5Stack CoreS3**
+(513 KB flash, 320×240 touchscreen, and the project's second architecture). See
+[docs/hardware.md](docs/hardware.md).
 
 ## Quick start
 
@@ -107,7 +109,7 @@ part about instances of one zapp sharing `.bss`.
 
 ```
 manifest/west.yml   the Zephyr pin (a main commit, deliberately — see below)
-include/zd/         the app ABI. No Zephyr and no LVGL headers may appear here.
+include/zd/         the zapp ABI. No Zephyr and no LVGL headers may appear here.
 app/                the desktop image
   src/wm/           client struct, stacking, focus, drag, handle registry
   src/chrome/       retro bevels, titlebar, palette
@@ -148,6 +150,9 @@ permission shim is the only linkable route to the filesystem.
 - **Zephyr is pinned to a `main` commit, not a release.** The `qemu_cortex_a53`
   display and pointer stack landed 2026-06-15, after the v4.4.1 tag. No release
   contains it.
+- **Xtensa cannot stream zapps off the filesystem.** It requires writable llext
+  storage, which requires a `peek()`-capable loader, and `llext_fs_loader` has
+  none — so the CoreS3 reads each zapp into RAM first. Discovery is unchanged.
 - **`native_sim` is not a target and cannot be.** `arch/posix/` has no `elf.c`
   and `arch_elf_relocate*` are weak stubs returning `-ENOTSUP`, so it builds
   happily with `CONFIG_LLEXT=y` and then fails every `llext_load()` at runtime.
@@ -158,7 +163,7 @@ permission shim is the only linkable route to the filesystem.
 |---|---|
 | [docs/design.md](docs/design.md) | The design doc and milestone log, including everything the build taught us that the plan got wrong |
 | [docs/abi.md](docs/abi.md) | The zapp ABI: versioning, ordering guarantees, handles, the symbol surface |
-| [docs/hardware.md](docs/hardware.md) | MIMXRT1060-EVK runbook |
+| [docs/hardware.md](docs/hardware.md) | Hardware runbooks: MIMXRT1060-EVK and M5Stack CoreS3 |
 | [CLAUDE.md](CLAUDE.md) | Orientation and the rules that are easy to get wrong |
 
 ## Licence

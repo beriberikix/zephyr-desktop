@@ -34,6 +34,9 @@ struct zd_zapp_instance {
 	void *user_data; /**< the app's per-instance slot; see zd_host_api */
 	char name[ZD_ZAPP_NAME_MAX];
 
+	void *elf_buf;   /**< heap copy of the ELF, when loading via buffer */
+	size_t elf_size;
+
 	bool live;
 	bool initialising; /**< inside init(); no events may be delivered yet */
 	bool pending_unload;

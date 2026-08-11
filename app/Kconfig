@@ -57,6 +57,24 @@ config ZD_SEED_BUILTIN_ZAPPS
 	  hardware with an SD card, seeding would defeat the point of checking
 	  that a .llext can arrive as a genuinely external file.
 
+config ZD_ZAPP_LOAD_VIA_BUFFER
+	bool "Read a zapp into RAM before loading it, instead of streaming from the file"
+	default y if LLEXT_STORAGE_WRITABLE
+	help
+	  llext_fs_loader streams the ELF straight off the filesystem, which is
+	  what we want: the file is the source of truth and nothing has to fit in
+	  RAM twice.
+
+	  Xtensa cannot do that. It requires CONFIG_LLEXT_STORAGE_WRITABLE, which
+	  in turn requires a loader implementing peek() -- and fs_loader sets
+	  .peek = NULL. So on those targets the zapp is read into a heap buffer
+	  first and handed to llext_buf_loader, which the loader may modify in
+	  place during linking. The buffer therefore has to stay allocated until
+	  the zapp is unloaded.
+
+	  Discovery is unaffected either way: the .llext is still a real file the
+	  desktop found on a real filesystem.
+
 config ZD_SELFTEST
 	bool "Run the permission and handle checks at boot"
 	default y
