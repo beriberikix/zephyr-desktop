@@ -397,7 +397,7 @@ press/release bursts, zero faults.
 ## What has and has not run on hardware
 
 **Confirmed on the device, end to end:** boot; the ili9342c display; the full
-15-check selftest on Xtensa; the FT6336 touch panel; the launcher opening on tap
+30-check selftest on Xtensa; the FT6336 touch panel; the launcher opening on tap
 and listing the three discovered zapps; tapping `hello`, which reads the `.llext`
 off the filesystem, relocates an **Xtensa shared object** through the buffer
 loader into the Harvard instruction/data heaps, and draws
@@ -415,3 +415,13 @@ is a file you can pull out, read on a laptop and replace.
 
 ...and the 8 MB of PSRAM, which now holds LVGL's pool and rendering buffers and
 gives 47 KB of DRAM back.
+
+...and, since ABI 0.3, a zapp writing to that card by touch. Tapping `Notes`
+appends a `note <n> at <uptime>ms` line to `/SD:/home/user/notes.txt` and
+immediately reads the file back to redraw the window, so the lines appearing on
+screen are the ones that reached the card, not an echo of what was typed.
+
+Every one of those calls borrows GPIO35 from the display and gives it back
+(`zd_bus_storage_acquire()` in `app/src/host/fs_api.c`), which is why the whole
+round trip works on a board where upstream's answer is to turn the screen off.
+The file survives a power cycle and is readable on a laptop.

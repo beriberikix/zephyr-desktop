@@ -840,6 +840,9 @@ was reached only by the boot selftest.
     shows the file back on relaunch, from every window it owns.
 35. ✅ Fourteen new boot selftests. Verified on all three targets; the CoreS3 run is the
     real one, since it writes an SD card through the GPIO35 arbiter with the display live.
+    Confirmed by touch on that board: tapping Notes appends to
+    `/SD:/home/user/notes.txt` and the window redraws from the file, so what is on screen
+    is what reached the card.
 
 **[I] The handle registry generalised for free.** Files and directories needed one new
 `enum zd_handle_kind` value and nothing else — same slots, same generation counter, same
