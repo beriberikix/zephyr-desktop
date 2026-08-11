@@ -284,7 +284,9 @@ configuration mistake, and it reproduces against stock Zephyr with one Kconfig:
 | `samples/subsys/fs/fs_sample` | lists the card's files |
 | `samples/subsys/fs/fs_sample -DCONFIG_DISPLAY=y` | CMD8 rejected, no OCR, mount -5 |
 
-Upstream's answer is to give up one of the two: the `m5stack_cores3/esp32s3/procpu/se`
+Filed upstream as [zephyrproject-rtos/zephyr#115960](https://github.com/zephyrproject-rtos/zephyr/issues/115960).
+
+Upstream's answer today is to give up one of the two: the `m5stack_cores3/esp32s3/procpu/se`
 variant ships with `&mipi_dbi { status = "disabled"; }` and a comment telling you
 to delete `SPIM2_MISO_GPIO35` from pinctrl if you want the screen instead.
 
