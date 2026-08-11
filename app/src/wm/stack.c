@@ -4,7 +4,7 @@
  * wm->stack is authoritative: head is topmost. LVGL's child order is a
  * projection of it, rewritten wholesale by zd_wm_restack(). Deriving the
  * projection from the model, rather than nudging LVGL one object at a time and
- * reading it back, is what makes always-on-top, minimise and per-app window
+ * reading it back, is what makes always-on-top, minimise and per-zapp window
  * groups cheap to add later.
  *
  * SPDX-License-Identifier: Apache-2.0

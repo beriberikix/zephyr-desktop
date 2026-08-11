@@ -30,7 +30,7 @@
 #define ZD_WIN_MIN_W (ZD_FRAME_PAD * 2 + 60)
 #define ZD_WIN_MIN_H (ZD_FRAME_PAD * 2 + ZD_TITLEBAR_H + ZD_CONTENT_GAP + 20)
 
-struct zd_app_instance; /* milestone F */
+struct zd_zapp_instance; /* milestone F */
 struct zd_wm;
 
 /**
@@ -45,7 +45,7 @@ struct zd_client {
 	sys_snode_t reap_node; /**< in wm->reap_list when pending_destroy */
 	uint32_t id;
 
-	/* LVGL subtree. Owned by the WM; never handed to an app. */
+	/* LVGL subtree. Owned by the WM; never handed to a zapp. */
 	lv_obj_t *frame; /**< child of layers->windows */
 	lv_obj_t *titlebar;
 	lv_obj_t *title_label;
@@ -59,7 +59,7 @@ struct zd_client {
 	bool focused;
 	bool pending_destroy;
 
-	struct zd_app_instance *owner; /**< NULL == desktop-internal window */
+	struct zd_zapp_instance *owner; /**< NULL == desktop-internal window */
 	uintptr_t handle;              /**< the app's handle for this window, or 0 */
 
 	/* Drag state, valid only while dragging. */
@@ -77,19 +77,19 @@ struct zd_wm {
 	struct zd_client *focused;
 	uint32_t next_id;
 
-	/* Depth of app callbacks currently on the stack. Teardown that would
+	/* Depth of zapp callbacks currently on the stack. Teardown that would
 	 * free code the return address points into must wait for this to hit 0.
 	 */
-	uint32_t in_app_callback;
+	uint32_t in_zapp_callback;
 
 	/* Called from the reap once a client's widgets are gone, before its slab
 	 * block is released. A hook rather than a direct call into the loader:
-	 * the WM has no business knowing that apps exist.
+	 * the WM has no business knowing that zapps exist.
 	 */
 	void (*on_client_destroyed)(struct zd_client *client);
 
 	/* Called when a client gains or loses focus, so the loader can turn it
-	 * into a ZD_EV_WINDOW_FOCUS / _BLUR for the owning app.
+	 * into a ZD_EV_WINDOW_FOCUS / _BLUR for the owning zapp.
 	 */
 	void (*on_client_focus)(struct zd_client *client, bool focused);
 };
@@ -100,7 +100,7 @@ void zd_wm_init(struct zd_wm *wm, struct zd_layers *layers);
  * @brief Create a managed window.
  *
  * The window is stacked on top but NOT focused: the caller must attach any
- * ownership and handle first, then call zd_wm_focus(), or the owning app's
+ * ownership and handle first, then call zd_wm_focus(), or the owning zapp's
  * focus event is dispatched before it has a handle and is dropped.
  *
  * @param geom desired outer rectangle; w/h are clamped to the window minimum,
@@ -120,7 +120,7 @@ int zd_wm_window_set_geometry(struct zd_client *client, int16_t x, int16_t y, in
 /**
  * @brief Mark a window for destruction.
  *
- * Never destroys inline. The caller may be an app callback running on a stack
+ * Never destroys inline. The caller may be a zapp callback running on a stack
  * frame inside the extension's own text, where deleting the LVGL subtree -- let
  * alone unloading the extension -- is a use-after-free. The window is unlinked
  * and queued; zd_wm_reap() does the deleting, from the top of the desktop loop.

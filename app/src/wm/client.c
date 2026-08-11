@@ -60,8 +60,8 @@ void zd_client_build(struct zd_client *client, lv_obj_t *parent)
 	zd_bevel_attach(client->close_btn, ZD_BEVEL_BUTTON);
 	zd_close_glyph_attach(client->close_btn);
 
-	/* Content area: where an app's widgets go. Sunken, like a Win95 client
-	 * area, and white so text drawn by an app reads.
+	/* Content area: where a zapp's widgets go. Sunken, like a Win95 client
+	 * area, and white so text drawn by a zapp reads.
 	 */
 	client->content = bare(client->frame);
 	lv_obj_set_size(client->content, inner_w,

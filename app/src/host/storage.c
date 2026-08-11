@@ -1,5 +1,5 @@
 /*
- * zephyr-desktop — mount the app filesystem, create the layout.
+ * zephyr-desktop — mount the zapp filesystem, create the layout.
  *
  * SPDX-License-Identifier: Apache-2.0
  */

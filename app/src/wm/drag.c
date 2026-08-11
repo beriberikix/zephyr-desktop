@@ -87,7 +87,7 @@ static void titlebar_event(lv_event_t *e)
 void zd_wm_drag_attach(struct zd_client *client)
 {
 	/* On the titlebar only: dragging by the content area would fight with
-	 * whatever the app puts there.
+	 * whatever the zapp puts there.
 	 */
 	lv_obj_add_event_cb(client->titlebar, titlebar_event, LV_EVENT_PRESSED, client);
 	lv_obj_add_event_cb(client->titlebar, titlebar_event, LV_EVENT_PRESSING, client);

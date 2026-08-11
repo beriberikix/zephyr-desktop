@@ -17,8 +17,8 @@
 #include "chrome/theme.h"
 #include "host/session.h"
 #include "host/storage.h"
-#include "loader/app_instance.h"
-#include "loader/app_loader.h"
+#include "loader/zapp_instance.h"
+#include "loader/zapp_loader.h"
 #include "loader/seed.h"
 #include "shell/desktop.h"
 #include "shell/launcher.h"
@@ -38,7 +38,7 @@ static void on_launcher_clicked(void *user_data)
 	zd_launcher_toggle();
 }
 
-static void on_app_chosen(const struct zd_app_entry *entry, void *user_data)
+static void on_app_chosen(const struct zd_zapp_entry *entry, void *user_data)
 {
 	ARG_UNUSED(user_data);
 
@@ -46,7 +46,7 @@ static void on_app_chosen(const struct zd_app_entry *entry, void *user_data)
 	 * ELF, an ABI mismatch or a full instance table all end up here. The
 	 * loader has already logged why and unwound whatever it did.
 	 */
-	(void)zd_app_launch(entry);
+	(void)zd_zapp_launch(entry);
 }
 
 int main(void)
@@ -61,7 +61,7 @@ int main(void)
 
 	ret = zd_storage_init();
 	if (ret != 0) {
-		LOG_ERR("storage init failed (%d); the desktop has no apps", ret);
+		LOG_ERR("storage init failed (%d); the desktop has no zapps", ret);
 	}
 
 	ret = zd_session_init(&session, 1000, "user");
@@ -79,9 +79,9 @@ int main(void)
 	zd_taskbar_init(layers.panel, on_launcher_clicked, NULL);
 	zd_wm_init(&wm, &layers);
 	zd_wm_desktop_attach_events(&wm);
-	wm.on_client_destroyed = zd_app_on_client_destroyed;
-	wm.on_client_focus = zd_app_on_client_focus;
-	zd_app_loader_init(&wm, &session);
+	wm.on_client_destroyed = zd_zapp_on_client_destroyed;
+	wm.on_client_focus = zd_zapp_on_client_focus;
+	zd_zapp_loader_init(&wm, &session);
 	zd_launcher_init(&layers, &session, on_app_chosen, &wm);
 	lvgl_unlock();
 
@@ -95,11 +95,11 @@ int main(void)
 		 * event callback -- see CLAUDE.md.
 		 */
 		lvgl_lock();
-		/* Windows first, then instances: an app's LVGL objects must be
+		/* Windows first, then instances: a zapp's LVGL objects must be
 		 * gone before the code that created them is unmapped.
 		 */
 		zd_wm_reap(&wm);
-		zd_app_reap();
+		zd_zapp_reap();
 		uint32_t sleep_ms = lv_timer_handler();
 		lvgl_unlock();
 

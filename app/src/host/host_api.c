@@ -1,10 +1,10 @@
 /*
  * zephyr-desktop — implementation of the host API vtable.
  *
- * Every entry point takes a zd_app_ctx_t and resolves the caller's instance
- * from it. Nothing here reads a global "current app" or "current user": that is
+ * Every entry point takes a zd_zapp_ctx_t and resolves the caller's instance
+ * from it. Nothing here reads a global "current zapp" or "current user": that is
  * what makes multi-user a login screen rather than a refactor, and what would
- * let these become syscalls under CONFIG_USERSPACE without an app changing.
+ * let these become syscalls under CONFIG_USERSPACE without a zapp changing.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -18,14 +18,14 @@
 
 #include "host_api.h"
 #include "session.h"
-#include "../loader/app_instance.h"
+#include "../loader/zapp_instance.h"
 #include "../wm/handle.h"
 #include "../wm/wm.h"
 
 LOG_MODULE_DECLARE(zd_main, CONFIG_ZD_LOG_LEVEL);
 
-/* Resolve the caller. A NULL or corrupt ctx is an app bug, not a desktop one. */
-static struct zd_app_instance *instance_of(zd_app_ctx_t ctx)
+/* Resolve the caller. A NULL or corrupt ctx is a zapp bug, not a desktop one. */
+static struct zd_zapp_instance *instance_of(zd_zapp_ctx_t ctx)
 {
 	if (ctx == NULL || ctx->inst == NULL || !ctx->inst->live) {
 		return NULL;
@@ -33,9 +33,9 @@ static struct zd_app_instance *instance_of(zd_app_ctx_t ctx)
 	return ctx->inst;
 }
 
-static struct zd_client *window_of(zd_app_ctx_t ctx, zd_window_t win)
+static struct zd_client *window_of(zd_zapp_ctx_t ctx, zd_window_t win)
 {
-	struct zd_app_instance *inst = instance_of(ctx);
+	struct zd_zapp_instance *inst = instance_of(ctx);
 
 	if (inst == NULL) {
 		return NULL;
@@ -46,9 +46,9 @@ static struct zd_client *window_of(zd_app_ctx_t ctx, zd_window_t win)
 
 /* --- windows --------------------------------------------------------------- */
 
-static zd_window_t api_window_create(zd_app_ctx_t ctx, const struct zd_window_desc *desc)
+static zd_window_t api_window_create(zd_zapp_ctx_t ctx, const struct zd_window_desc *desc)
 {
-	struct zd_app_instance *inst = instance_of(ctx);
+	struct zd_zapp_instance *inst = instance_of(ctx);
 	struct zd_client *client;
 	lv_area_t geom = { 0 };
 	const lv_area_t *want = NULL;
@@ -58,9 +58,9 @@ static zd_window_t api_window_create(zd_app_ctx_t ctx, const struct zd_window_de
 		return NULL;
 	}
 
-	if (inst->window_count >= CONFIG_ZD_MAX_WINDOWS_PER_APP) {
+	if (inst->window_count >= CONFIG_ZD_MAX_WINDOWS_PER_ZAPP) {
 		LOG_WRN("'%s' hit its window quota (%d)", inst->name,
-			CONFIG_ZD_MAX_WINDOWS_PER_APP);
+			CONFIG_ZD_MAX_WINDOWS_PER_ZAPP);
 		return NULL;
 	}
 
@@ -87,7 +87,7 @@ static zd_window_t api_window_create(zd_app_ctx_t ctx, const struct zd_window_de
 	client->handle = handle;
 	inst->window_count++;
 
-	/* Only now, with ownership and handle in place, can the app be told it
+	/* Only now, with ownership and handle in place, can the zapp be told it
 	 * has focus -- the event carries the handle it just received.
 	 */
 	zd_wm_focus(inst->wm, client);
@@ -95,7 +95,7 @@ static zd_window_t api_window_create(zd_app_ctx_t ctx, const struct zd_window_de
 	return (zd_window_t)handle;
 }
 
-static void api_window_close(zd_app_ctx_t ctx, zd_window_t win)
+static void api_window_close(zd_zapp_ctx_t ctx, zd_window_t win)
 {
 	struct zd_client *client = window_of(ctx, win);
 
@@ -104,7 +104,7 @@ static void api_window_close(zd_app_ctx_t ctx, zd_window_t win)
 	}
 }
 
-static int api_window_set_title(zd_app_ctx_t ctx, zd_window_t win, const char *title)
+static int api_window_set_title(zd_zapp_ctx_t ctx, zd_window_t win, const char *title)
 {
 	struct zd_client *client = window_of(ctx, win);
 
@@ -116,7 +116,7 @@ static int api_window_set_title(zd_app_ctx_t ctx, zd_window_t win, const char *t
 	return 0;
 }
 
-static int api_window_set_geometry(zd_app_ctx_t ctx, zd_window_t win,
+static int api_window_set_geometry(zd_zapp_ctx_t ctx, zd_window_t win,
 				   const struct zd_rect *geom)
 {
 	struct zd_client *client = window_of(ctx, win);
@@ -128,7 +128,7 @@ static int api_window_set_geometry(zd_app_ctx_t ctx, zd_window_t win,
 	return zd_wm_window_set_geometry(client, geom->x, geom->y, geom->w, geom->h);
 }
 
-static int api_window_get_geometry(zd_app_ctx_t ctx, zd_window_t win, struct zd_rect *out)
+static int api_window_get_geometry(zd_zapp_ctx_t ctx, zd_window_t win, struct zd_rect *out)
 {
 	struct zd_client *client = window_of(ctx, win);
 
@@ -145,10 +145,10 @@ static int api_window_get_geometry(zd_app_ctx_t ctx, zd_window_t win, struct zd_
 
 /* --- content --------------------------------------------------------------- */
 
-static zd_label_t api_label_create(zd_app_ctx_t ctx, zd_window_t win, const char *text,
+static zd_label_t api_label_create(zd_zapp_ctx_t ctx, zd_window_t win, const char *text,
 				   int16_t x, int16_t y)
 {
-	struct zd_app_instance *inst = instance_of(ctx);
+	struct zd_zapp_instance *inst = instance_of(ctx);
 	struct zd_client *client = window_of(ctx, win);
 	lv_obj_t *label;
 	uintptr_t handle;
@@ -170,9 +170,9 @@ static zd_label_t api_label_create(zd_app_ctx_t ctx, zd_window_t win, const char
 	return (zd_label_t)handle;
 }
 
-static int api_label_set_text(zd_app_ctx_t ctx, zd_label_t label, const char *text)
+static int api_label_set_text(zd_zapp_ctx_t ctx, zd_label_t label, const char *text)
 {
-	struct zd_app_instance *inst = instance_of(ctx);
+	struct zd_zapp_instance *inst = instance_of(ctx);
 	lv_obj_t *obj;
 
 	if (inst == NULL) {
@@ -190,9 +190,9 @@ static int api_label_set_text(zd_app_ctx_t ctx, zd_label_t label, const char *te
 
 /* --- filesystem and misc ---------------------------------------------------- */
 
-static int api_path_resolve(zd_app_ctx_t ctx, enum zd_dir dir, char *out, uint32_t out_len)
+static int api_path_resolve(zd_zapp_ctx_t ctx, enum zd_dir dir, char *out, uint32_t out_len)
 {
-	struct zd_app_instance *inst = instance_of(ctx);
+	struct zd_zapp_instance *inst = instance_of(ctx);
 
 	if (inst == NULL || out == NULL) {
 		return -EINVAL;
@@ -201,9 +201,9 @@ static int api_path_resolve(zd_app_ctx_t ctx, enum zd_dir dir, char *out, uint32
 	return zd_session_path(inst->session, dir, out, out_len);
 }
 
-static void api_log(zd_app_ctx_t ctx, int level, const char *msg)
+static void api_log(zd_zapp_ctx_t ctx, int level, const char *msg)
 {
-	struct zd_app_instance *inst = instance_of(ctx);
+	struct zd_zapp_instance *inst = instance_of(ctx);
 
 	ARG_UNUSED(level);
 
@@ -219,23 +219,23 @@ static int64_t api_uptime_ms(void)
 	return k_uptime_get();
 }
 
-static void api_set_user_data(zd_app_ctx_t ctx, void *data)
+static void api_set_user_data(zd_zapp_ctx_t ctx, void *data)
 {
-	struct zd_app_instance *inst = instance_of(ctx);
+	struct zd_zapp_instance *inst = instance_of(ctx);
 
 	if (inst != NULL) {
 		inst->user_data = data;
 	}
 }
 
-static void *api_get_user_data(zd_app_ctx_t ctx)
+static void *api_get_user_data(zd_zapp_ctx_t ctx)
 {
-	struct zd_app_instance *inst = instance_of(ctx);
+	struct zd_zapp_instance *inst = instance_of(ctx);
 
 	return inst != NULL ? inst->user_data : NULL;
 }
 
-static void *api_unsafe_lvgl_content(zd_app_ctx_t ctx, zd_window_t win)
+static void *api_unsafe_lvgl_content(zd_zapp_ctx_t ctx, zd_window_t win)
 {
 	struct zd_client *client = window_of(ctx, win);
 
@@ -264,16 +264,16 @@ static const struct zd_host_api host_api_trusted = {
 	.unsafe_lvgl_content = api_unsafe_lvgl_content,
 };
 
-const struct zd_host_api *zd_host_api_for(struct zd_app_instance *inst)
+const struct zd_host_api *zd_host_api_for(struct zd_zapp_instance *inst)
 {
 	bool trusted = inst->manifest != NULL &&
-		       (inst->manifest->flags & ZD_APP_FLAG_TRUSTED) != 0;
+		       (inst->manifest->flags & ZD_ZAPP_FLAG_TRUSTED) != 0;
 
 	return trusted ? &host_api_trusted : &host_api_untrusted;
 }
 
 /*
- * The single symbol the desktop exports to extensions. Everything else an app
+ * The single symbol the desktop exports to extensions. Everything else a zapp
  * can reach, it reaches through the returned table.
  */
 const struct zd_host_api *zd_get_host_api(void)

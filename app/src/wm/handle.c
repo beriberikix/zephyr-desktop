@@ -18,7 +18,7 @@ LOG_MODULE_DECLARE(zd_main, CONFIG_ZD_LOG_LEVEL);
 
 /*
  * A handle packs a 1-based slot index in the low bits and a generation counter
- * above it. Zero is never valid, so a zeroed struct in an app is a dead handle
+ * above it. Zero is never valid, so a zeroed struct in a zapp is a dead handle
  * rather than a reference to slot 0.
  */
 #define INDEX_BITS 12
@@ -28,7 +28,7 @@ BUILD_ASSERT(HANDLE_SLOTS < INDEX_MASK, "handle table larger than the index fiel
 
 struct slot {
 	void *object;
-	struct zd_app_instance *owner;
+	struct zd_zapp_instance *owner;
 	uint32_t generation;
 	uint8_t kind;
 	bool live;
@@ -55,7 +55,7 @@ static struct slot *unpack(uintptr_t handle, uint32_t *generation_out)
 }
 
 uintptr_t zd_handle_alloc(enum zd_handle_kind kind, void *object,
-			  struct zd_app_instance *owner)
+			  struct zd_zapp_instance *owner)
 {
 	for (uint32_t i = 0; i < HANDLE_SLOTS; i++) {
 		struct slot *slot = &slots[i];
@@ -77,7 +77,7 @@ uintptr_t zd_handle_alloc(enum zd_handle_kind kind, void *object,
 }
 
 void *zd_handle_deref(uintptr_t handle, enum zd_handle_kind kind,
-		      struct zd_app_instance *owner)
+		      struct zd_zapp_instance *owner)
 {
 	uint32_t generation;
 	struct slot *slot = unpack(handle, &generation);
@@ -93,7 +93,7 @@ void *zd_handle_deref(uintptr_t handle, enum zd_handle_kind kind,
 		return NULL;
 	}
 
-	/* Desktop-internal callers pass NULL and skip the check; an app may only
+	/* Desktop-internal callers pass NULL and skip the check; a zapp may only
 	 * ever touch what it owns.
 	 */
 	if (owner != NULL && slot->owner != owner) {
@@ -122,7 +122,7 @@ void zd_handle_free(uintptr_t handle)
 	live_count--;
 }
 
-void zd_handle_free_all(struct zd_app_instance *owner)
+void zd_handle_free_all(struct zd_zapp_instance *owner)
 {
 	for (uint32_t i = 0; i < HANDLE_SLOTS; i++) {
 		struct slot *slot = &slots[i];

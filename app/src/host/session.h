@@ -2,7 +2,7 @@
  * zephyr-desktop — session and user context.
  *
  * There is exactly one session in the MVP, but nothing here assumes that. No
- * global "current user" exists: every host-API call carries a zd_app_ctx_t, the
+ * global "current user" exists: every host-API call carries a zd_zapp_ctx_t, the
  * ctx points at its instance, and the instance points at its session. Adding a
  * second session is then a login screen, not a refactor.
  *
@@ -15,7 +15,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#include <zd/app_abi.h>
+#include <zd/zapp_abi.h>
 
 #define ZD_USER_MAX     16
 #define ZD_FS_ROOT_MAX  4

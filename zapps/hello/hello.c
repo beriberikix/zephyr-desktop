@@ -1,5 +1,5 @@
 /*
- * hello — the smallest possible zephyr-desktop app.
+ * hello — the smallest possible zephyr-desktop zapp.
  *
  * Built as a real .llext, discovered on the filesystem, loaded at runtime, and
  * linked against exactly one desktop symbol. Everything it can do, it does
@@ -13,21 +13,21 @@
 
 #include <zephyr/llext/symbol.h>
 
-#include <zd/app_abi.h>
+#include <zd/zapp_abi.h>
 
 /*
- * `host` is genuinely per-app: every instance is handed the same table, so a
+ * `host` is genuinely per-zapp: every instance is handed the same table, so a
  * file-scope variable is correct here.
  *
  * Per-INSTANCE state is a different matter. llext loads an image once and
- * refcounts it, so launching this app twice shares this file's .data and .bss
+ * refcounts it, so launching this zapp twice shares this file's .data and .bss
  * between both instances -- a second `static zd_window_t window` would be
  * silently overwritten by whichever instance started last. Anything per
  * instance goes through set_user_data()/get_user_data().
  */
 static const struct zd_host_api *host;
 
-static int hello_init(zd_app_ctx_t ctx, const struct zd_host_api *api)
+static int hello_init(zd_zapp_ctx_t ctx, const struct zd_host_api *api)
 {
 	struct zd_window_desc desc = {
 		.title = "Hello",
@@ -40,11 +40,11 @@ static int hello_init(zd_app_ctx_t ctx, const struct zd_host_api *api)
 		return -1; /* the loader checks this too; belt and braces */
 	}
 
-	/* An app does not actually need to import anything -- init() is handed
+	/* A zapp does not actually need to import anything -- init() is handed
 	 * the table. This call exists to exercise the other direction anyway:
 	 * it forces the loader to resolve a symbol out of the desktop's export
 	 * table at link time, so a broken EXPORT_GROUP_SYMBOL fails loudly here
-	 * rather than silently the first time some later app depends on it.
+	 * rather than silently the first time some later zapp depends on it.
 	 */
 	if (zd_get_host_api() == NULL) {
 		return -1;
@@ -61,7 +61,7 @@ static int hello_init(zd_app_ctx_t ctx, const struct zd_host_api *api)
 	}
 
 	/* The handle is pointer-sized, so it rides in the slot directly and this
-	 * app needs no allocation at all.
+	 * zapp needs no allocation at all.
 	 */
 	api->set_user_data(ctx, (void *)window);
 
@@ -69,7 +69,7 @@ static int hello_init(zd_app_ctx_t ctx, const struct zd_host_api *api)
 	return 0;
 }
 
-static void hello_event(zd_app_ctx_t ctx, const struct zd_event *ev)
+static void hello_event(zd_zapp_ctx_t ctx, const struct zd_event *ev)
 {
 	/* Proves the event path is real rather than aspirational: the title
 	 * tracks focus, which the desktop only ever tells us about by calling
@@ -97,14 +97,14 @@ static void hello_event(zd_app_ctx_t ctx, const struct zd_event *ev)
 	}
 }
 
-static void hello_fini(zd_app_ctx_t ctx)
+static void hello_fini(zd_zapp_ctx_t ctx)
 {
 	host->log(ctx, 0, "goodbye");
 	host->set_user_data(ctx, NULL);
 }
 
-struct zd_app_manifest zd_app_manifest = {
-	.magic = ZD_APP_MAGIC,
+struct zd_zapp_manifest zd_zapp_manifest = {
+	.magic = ZD_ZAPP_MAGIC,
 	.abi_major = ZD_ABI_MAJOR,
 	.abi_minor = ZD_ABI_MINOR,
 	.flags = 0, /* untrusted: no unsafe_lvgl_content for us */
@@ -114,4 +114,4 @@ struct zd_app_manifest zd_app_manifest = {
 	.event = hello_event,
 	.fini = hello_fini,
 };
-LL_EXTENSION_SYMBOL(zd_app_manifest);
+LL_EXTENSION_SYMBOL(zd_zapp_manifest);

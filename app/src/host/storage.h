@@ -7,13 +7,13 @@
 #ifndef ZD_HOST_STORAGE_H_
 #define ZD_HOST_STORAGE_H_
 
-#include <zd/app_abi.h> /* ZD_PATH_MAX */
+#include <zd/zapp_abi.h> /* ZD_PATH_MAX */
 
 /*
  * Everything hangs off one root. FATFS insists a mount point be "/<VOLUME>:",
  * with the volume string generated from the devicetree disk-name, so paths are
  * not free-form: under QEMU the root is "/RAM:" and on an SD-backed board it
- * would be "/SD:". Apps never see this -- they go through zd_session_path() --
+ * would be "/SD:". Zapps never see this -- they go through zd_session_path() --
  * which is exactly why that indirection exists.
  */
 #define ZD_FS_ROOT CONFIG_ZD_FS_ROOT
@@ -24,11 +24,11 @@
 #define ZD_PATH_HOME_BASE    ZD_FS_ROOT "/home"
 #define ZD_PATH_TMP          ZD_FS_ROOT "/tmp"
 
-/** File extension every app binary carries. */
+/** File extension every zapp binary carries. */
 #define ZD_ZAPP_SUFFIX ".llext"
 
 /**
- * @brief Mount the app filesystem and ensure the directory layout exists.
+ * @brief Mount the zapp filesystem and ensure the directory layout exists.
  *
  * Formats on first boot when the volume has no filesystem. Idempotent.
  */

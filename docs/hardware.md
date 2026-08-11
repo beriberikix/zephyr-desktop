@@ -2,7 +2,7 @@
 
 The hardware checkpoint is deliberately **headless**. No panel is attached yet,
 so the desktop runs against a dummy display controller: the WM, the loader, the
-filesystem and the app ABI are all exercised on real Cortex-M7 silicon, and only
+filesystem and the zapp ABI are all exercised on real Cortex-M7 silicon, and only
 the pixels are absent. LVGL still renders into a buffer, so this is a real run
 rather than a compile check.
 
@@ -20,11 +20,11 @@ rather than a compile check.
 
 Everything is in `app/boards/mimxrt1060_evk_mimxrt1062_qspi.{conf,overlay}`:
 
-- `CONFIG_ZD_FS_ROOT="/SD:"` instead of `/RAM:`. Apps never notice — they resolve
+- `CONFIG_ZD_FS_ROOT="/SD:"` instead of `/RAM:`. Zapps never notice — they resolve
   directories through the session, which is why that indirection exists.
 - SD card instead of a RAM disk.
-- **`CONFIG_ZD_SEED_BUILTIN_APPS=n`.** The point of this checkpoint is that a
-  `.llext` arrives from *outside*, so the desktop must find apps it did not write
+- **`CONFIG_ZD_SEED_BUILTIN_ZAPPS=n`.** The point of this checkpoint is that a
+  `.llext` arrives from *outside*, so the desktop must find zapps it did not write
   itself.
 - **`CONFIG_FS_FATFS_MKFS=n`.** Formatting someone's SD card because we failed to
   read it would be a poor first impression; fail the mount and say so.
@@ -71,17 +71,17 @@ discovered N app(s)
 zephyr-desktop up on <display>
 ```
 
-That alone is the checkpoint: a filesystem the desktop did not create, apps it
+That alone is the checkpoint: a filesystem the desktop did not create, zapps it
 did not install, and the permission and handle checks passing on real silicon.
 
 To prove load/unload without a pointer, temporarily launch from `main()` after
 `zd_launcher_init()`:
 
 ```c
-struct zd_app_entry entry[ZD_MAX_DISCOVERED];
-int n = zd_apps_discover(&session, entry, ZD_MAX_DISCOVERED);
+struct zd_zapp_entry entry[ZD_MAX_DISCOVERED];
+int n = zd_zapps_discover(&session, entry, ZD_MAX_DISCOVERED);
 if (n > 0) {
-        zd_app_launch(&entry[0]);
+        zd_zapp_launch(&entry[0]);
 }
 ```
 

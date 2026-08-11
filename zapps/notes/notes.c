@@ -1,9 +1,9 @@
 /*
- * notes — a second app, to prove the desktop runs more than one.
+ * notes — a second zapp, to prove the desktop runs more than one.
  *
  * Where hello is the minimum, this one exercises the parts of the ABI hello
  * does not: path resolution, and more than one window per instance. It keeps
- * opening windows until the desktop refuses, so the per-app quota is visible
+ * opening windows until the desktop refuses, so the per-zapp quota is visible
  * rather than merely asserted.
  *
  * SPDX-License-Identifier: Apache-2.0
@@ -11,13 +11,13 @@
 
 #include <zephyr/llext/symbol.h>
 
-#include <zd/app_abi.h>
+#include <zd/zapp_abi.h>
 
 #define MAX_TRIES 8
 
 static const struct zd_host_api *host;
 
-static int notes_init(zd_app_ctx_t ctx, const struct zd_host_api *api)
+static int notes_init(zd_zapp_ctx_t ctx, const struct zd_host_api *api)
 {
 	char home[ZD_PATH_MAX];
 	zd_window_t first = NULL;
@@ -46,7 +46,7 @@ static int notes_init(zd_app_ctx_t ctx, const struct zd_host_api *api)
 		return -1;
 	}
 
-	/* The app has no idea what the filesystem root is called; that is the
+	/* The zapp has no idea what the filesystem root is called; that is the
 	 * session's business. It asks.
 	 */
 	if (api->path_resolve(ctx, ZD_DIR_HOME, home, sizeof(home)) == 0) {
@@ -58,20 +58,20 @@ static int notes_init(zd_app_ctx_t ctx, const struct zd_host_api *api)
 	return 0;
 }
 
-static void notes_fini(zd_app_ctx_t ctx)
+static void notes_fini(zd_zapp_ctx_t ctx)
 {
 	host->log(ctx, 0, "notes closed");
 }
 
-struct zd_app_manifest zd_app_manifest = {
-	.magic = ZD_APP_MAGIC,
+struct zd_zapp_manifest zd_zapp_manifest = {
+	.magic = ZD_ZAPP_MAGIC,
 	.abi_major = ZD_ABI_MAJOR,
 	.abi_minor = ZD_ABI_MINOR,
 	.flags = 0,
 	.name = "Notes",
 	.icon = NULL,
 	.init = notes_init,
-	.event = NULL, /* an app need not care about events */
+	.event = NULL, /* a zapp need not care about events */
 	.fini = notes_fini,
 };
-LL_EXTENSION_SYMBOL(zd_app_manifest);
+LL_EXTENSION_SYMBOL(zd_zapp_manifest);

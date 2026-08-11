@@ -22,8 +22,8 @@ target_sources(app PRIVATE
   src/host/storage.c
   src/host/fs_shim.c
   src/host/host_api.c
-  src/loader/app_loader.c
-  src/loader/app_instance.c
+  src/loader/zapp_loader.c
+  src/loader/zapp_instance.c
   src/wm/wm.c
   src/wm/client.c
   src/wm/stack.c
@@ -33,7 +33,7 @@ target_sources(app PRIVATE
 )
 
 target_sources_ifdef(CONFIG_ZD_SELFTEST app PRIVATE src/selftest.c)
-target_sources_ifdef(CONFIG_ZD_SEED_BUILTIN_APPS app PRIVATE src/loader/seed.c)
+target_sources_ifdef(CONFIG_ZD_SEED_BUILTIN_ZAPPS app PRIVATE src/loader/seed.c)
 
 # --- zapps --------------------------------------------------------------------
 #
@@ -56,11 +56,11 @@ set(ZD_ZAPP_NAMES hello notes badabi)
 
 foreach(zd_app ${ZD_ZAPP_NAMES})
   set(ZD_${zd_app}_LLEXT ${PROJECT_BINARY_DIR}/${zd_app}.llext)
-  add_llext_target(zd_app_${zd_app}
+  add_llext_target(zd_zapp_${zd_app}
     OUTPUT  ${ZD_${zd_app}_LLEXT}
     SOURCES ${ZD_ZAPPS}/${zd_app}/${zd_app}.c
   )
-  llext_include_directories(zd_app_${zd_app} ${ZD_INCLUDE})
+  llext_include_directories(zd_zapp_${zd_app} ${ZD_INCLUDE})
 
   # WORKAROUND (Zephyr main @ e201b84b): add_llext_target's packaging step does
   # not re-run when a source file changes. Its chain is
@@ -72,9 +72,9 @@ foreach(zd_app ${ZD_ZAPP_NAMES})
   # editing an app leave the .llext untouched; only `west build -p` refreshes it.
   #
   # Re-attach the missing file dependency to the documented pkg_input property.
-  get_target_property(zd_pkg_input zd_app_${zd_app} pkg_input)
+  get_target_property(zd_pkg_input zd_zapp_${zd_app} pkg_input)
   add_custom_command(OUTPUT ${zd_pkg_input} APPEND
-    DEPENDS ${ZD_ZAPPS}/${zd_app}/${zd_app}.c ${ZD_INCLUDE}/zd/app_abi.h
+    DEPENDS ${ZD_ZAPPS}/${zd_app}/${zd_app}.c ${ZD_INCLUDE}/zd/zapp_abi.h
   )
 
   generate_inc_file_for_target(app

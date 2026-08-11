@@ -2,7 +2,7 @@
 
 A retro desktop shell on [Zephyr RTOS](https://zephyrproject.org) + [LVGL](https://lvgl.io):
 overlapping draggable windows with hand-built Win95-era chrome, a taskbar with a
-launcher and clock, and **apps as `.llext` extensions discovered on a filesystem
+launcher and clock, and **zapps as `.llext` extensions discovered on a filesystem
 and loaded at runtime**.
 
 It runs on `qemu_cortex_a53` — natively on macOS, in a real window, with a real
@@ -23,14 +23,14 @@ mouse.
 
 ## Status
 
-The MVP is complete. Boot to a retro desktop; the launcher enumerates apps found
-on the filesystem; clicking one loads its `.llext` at runtime; the app calls into
+The MVP is complete. Boot to a retro desktop; the launcher enumerates zapps found
+on the filesystem; clicking one loads its `.llext` at runtime; the zapp calls into
 the desktop API to create a window and draw "hello world, Zephyr!"; two instances
 can be open, dragged over each other with correct z-order and focus; closing one
 unloads the extension cleanly with no leaks.
 
 Verified over 20 consecutive launch/close cycles: 20 loads, 20 unloads, zero
-errors, and after every one — 0 windows live, 8 slab blocks free, 0 apps live,
+errors, and after every one — 0 windows live, 8 slab blocks free, 0 zapps live,
 0 handles live.
 
 `mimxrt1060_evk` builds (FLASH 324 KB, RAM 284 KB) but has not been run on
@@ -63,16 +63,16 @@ It reports pixels changed between shots, which is usually the assertion you
 actually want. `tools/zoom.py` magnifies a region, because two one-pixel bevel
 rings cannot be judged at 1:1.
 
-## Writing an app
+## Writing a zapp
 
-An app is one C file that includes exactly one header and links against
+A zapp is one C file that includes exactly one header and links against
 essentially nothing:
 
 ```c
 #include <zephyr/llext/symbol.h>
-#include <zd/app_abi.h>
+#include <zd/zapp_abi.h>
 
-static int hello_init(zd_app_ctx_t ctx, const struct zd_host_api *api)
+static int hello_init(zd_zapp_ctx_t ctx, const struct zd_host_api *api)
 {
         struct zd_window_desc desc = { .title = "Hello" };
         zd_window_t win = api->window_create(ctx, &desc);
@@ -82,14 +82,14 @@ static int hello_init(zd_app_ctx_t ctx, const struct zd_host_api *api)
         return 0;
 }
 
-struct zd_app_manifest zd_app_manifest = {
-        .magic = ZD_APP_MAGIC,
+struct zd_zapp_manifest zd_zapp_manifest = {
+        .magic = ZD_ZAPP_MAGIC,
         .abi_major = ZD_ABI_MAJOR,
         .abi_minor = ZD_ABI_MINOR,
         .name = "Hello",
         .init = hello_init,
 };
-LL_EXTENSION_SYMBOL(zd_app_manifest);
+LL_EXTENSION_SYMBOL(zd_zapp_manifest);
 ```
 
 No LVGL, no Zephyr, no idea where its window comes from or what draws it. Drop
@@ -101,7 +101,7 @@ source, and this project has one. A sibling `apps/` reads as a typo for it every
 single time.)
 
 Read [docs/abi.md](docs/abi.md) before writing a second one — particularly the
-part about instances of one app sharing `.bss`.
+part about instances of one zapp sharing `.bss`.
 
 ## How it works
 
@@ -125,12 +125,12 @@ Three ideas carry most of the weight:
 projection re-applied from it — and one central dispatch path where every frame
 carries a single callback and every child bubbles to it.
 
-**Nothing is destroyed during dispatch.** An app closing its own window is
+**Nothing is destroyed during dispatch.** A zapp closing its own window is
 running on a stack frame inside text that unloading would free. Window close and
 instance unload are queued and completed from the desktop loop, guarded by a
 callback-depth counter.
 
-**The ABI is a vtable, not a symbol pile.** The desktop exports one symbol; apps
+**The ABI is a vtable, not a symbol pile.** The desktop exports one symbol; zapps
 get opaque, generation-counted handles validated against their owner. That keeps
 the symbol surface at **1** (Zephyr's defaults would export 172), so the
 permission shim is the only linkable route to the filesystem.
@@ -141,7 +141,7 @@ permission shim is the only linkable route to the filesystem.
   in the kernel address space. The fs shim is a contract, not a security
   boundary. `CONFIG_USERSPACE` + `llext_add_domain()` is the hardening path and
   is reachable on both targets — deferred, not designed out.
-- **Apps are callback-driven**, single-threaded. `ZD_APP_FLAG_WANTS_THREAD` is
+- **Zapps are callback-driven**, single-threaded. `ZD_ZAPP_FLAG_WANTS_THREAD` is
   reserved, not honoured.
 - **No window resize**, no clipboard, no notifications, no sound, no theming
   engine, no real multi-user login, no hardware acceleration yet.
@@ -157,7 +157,7 @@ permission shim is the only linkable route to the filesystem.
 | | |
 |---|---|
 | [docs/design.md](docs/design.md) | The design doc and milestone log, including everything the build taught us that the plan got wrong |
-| [docs/abi.md](docs/abi.md) | The app ABI: versioning, ordering guarantees, handles, the symbol surface |
+| [docs/abi.md](docs/abi.md) | The zapp ABI: versioning, ordering guarantees, handles, the symbol surface |
 | [docs/hardware.md](docs/hardware.md) | MIMXRT1060-EVK runbook |
 | [CLAUDE.md](CLAUDE.md) | Orientation and the rules that are easy to get wrong |
 

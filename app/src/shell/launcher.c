@@ -25,7 +25,7 @@ static struct {
 	const struct zd_session *session;
 	zd_launch_cb_t cb;
 	void *cb_arg;
-	struct zd_app_entry entries[ZD_MAX_DISCOVERED];
+	struct zd_zapp_entry entries[ZD_MAX_DISCOVERED];
 	int count;
 	bool open;
 } menu;
@@ -83,7 +83,7 @@ void zd_launcher_refresh(void)
 
 	lv_obj_clean(menu.panel);
 
-	menu.count = zd_apps_discover(menu.session, menu.entries, ZD_MAX_DISCOVERED);
+	menu.count = zd_zapps_discover(menu.session, menu.entries, ZD_MAX_DISCOVERED);
 	if (menu.count < 0) {
 		menu.count = 0;
 	}

@@ -78,8 +78,8 @@ static void test_handles(void)
 {
 	int object_a = 1;
 	int object_b = 2;
-	struct zd_app_instance *owner_a = (struct zd_app_instance *)0xA;
-	struct zd_app_instance *owner_b = (struct zd_app_instance *)0xB;
+	struct zd_zapp_instance *owner_a = (struct zd_zapp_instance *)0xA;
+	struct zd_zapp_instance *owner_b = (struct zd_zapp_instance *)0xB;
 	uintptr_t handle;
 	uintptr_t reused;
 

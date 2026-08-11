@@ -28,7 +28,7 @@ config ZD_FS_ROOT
 	  -- they resolve directories through the session -- so changing it per
 	  board costs nothing above the mount table.
 
-config ZD_MAX_WINDOWS_PER_APP
+config ZD_MAX_WINDOWS_PER_ZAPP
 	int "Maximum windows a single app instance may own"
 	default 4
 
@@ -45,7 +45,7 @@ config ZD_FS_AUTOFORMAT
 	  media, where a failed mount means "unreadable card", not "please
 	  destroy it".
 
-config ZD_SEED_BUILTIN_APPS
+config ZD_SEED_BUILTIN_ZAPPS
 	bool "Install the built-in apps into /system/apps at boot"
 	default y
 	help

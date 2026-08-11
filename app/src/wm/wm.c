@@ -82,7 +82,7 @@ struct zd_client *zd_wm_window_create(struct zd_wm *wm, const char *title,
 
 	/* Newest window goes on top of the stacking list. It is deliberately NOT
 	 * focused here: the caller still has to attach ownership and a handle,
-	 * and focusing first means the owning app's ZD_EV_WINDOW_FOCUS is
+	 * and focusing first means the owning zapp's ZD_EV_WINDOW_FOCUS is
 	 * dispatched against a window it does not yet have a handle for, and is
 	 * silently dropped. Creation and focus are separate policies.
 	 */
@@ -117,7 +117,7 @@ int zd_wm_window_set_geometry(struct zd_client *client, int16_t x, int16_t y, in
 	width = MAX(width, ZD_WIN_MIN_W);
 	height = MAX(height, ZD_WIN_MIN_H);
 
-	/* Resize is out of scope for the MVP, so only the position moves; an app
+	/* Resize is out of scope for the MVP, so only the position moves; a zapp
 	 * asking for a different size gets its request clamped away rather than
 	 * silently half-applied.
 	 */
@@ -168,10 +168,10 @@ void zd_wm_reap(struct zd_wm *wm)
 	sys_snode_t *node;
 	uint32_t reaped = 0;
 
-	/* Never reap with an app frame on the stack: the return address may
+	/* Never reap with a zapp frame on the stack: the return address may
 	 * point into text we are about to free.
 	 */
-	if (wm->in_app_callback > 0) {
+	if (wm->in_zapp_callback > 0) {
 		return;
 	}
 
@@ -182,7 +182,7 @@ void zd_wm_reap(struct zd_wm *wm)
 		zd_client_destroy_widgets(client);
 
 		/* Tell the owner after the widgets are gone but before the slab
-		 * block is reused, so the loader can drop the app's handle and
+		 * block is reused, so the loader can drop the zapp's handle and
 		 * decide whether the instance still has a reason to exist.
 		 */
 		if (wm->on_client_destroyed != NULL) {

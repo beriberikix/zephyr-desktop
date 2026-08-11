@@ -1,5 +1,5 @@
 /*
- * zephyr-desktop — scanning app directories.
+ * zephyr-desktop — scanning zapp directories.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -12,12 +12,12 @@
 #include <zephyr/fs/fs.h>
 #include <zephyr/logging/log.h>
 
-#include "app_loader.h"
+#include "zapp_loader.h"
 #include "../host/storage.h"
 
 LOG_MODULE_DECLARE(zd_main, CONFIG_ZD_LOG_LEVEL);
 
-static bool has_app_suffix(const char *name)
+static bool has_zapp_suffix(const char *name)
 {
 	size_t name_len = strlen(name);
 	size_t suffix_len = strlen(ZD_ZAPP_SUFFIX);
@@ -40,7 +40,7 @@ static void stem_of(const char *filename, char *out, size_t out_len)
 	out[len] = '\0';
 }
 
-static int scan_dir(const char *dir, bool system, struct zd_app_entry *out, size_t max,
+static int scan_dir(const char *dir, bool system, struct zd_zapp_entry *out, size_t max,
 		    size_t count)
 {
 	struct fs_dir_t dirp;
@@ -51,10 +51,10 @@ static int scan_dir(const char *dir, bool system, struct zd_app_entry *out, size
 
 	ret = fs_opendir(&dirp, dir);
 	if (ret != 0) {
-		/* A missing app directory is normal, not an error: a session may
-		 * simply have no user-installed apps.
+		/* A missing zapp directory is normal, not an error: a session may
+		 * simply have no user-installed zapps.
 		 */
-		LOG_DBG("no app directory at %s (%d)", dir, ret);
+		LOG_DBG("no zapp directory at %s (%d)", dir, ret);
 		return (int)count;
 	}
 
@@ -64,7 +64,7 @@ static int scan_dir(const char *dir, bool system, struct zd_app_entry *out, size
 			break; /* error, or end of directory */
 		}
 
-		if (entry.type != FS_DIR_ENTRY_FILE || !has_app_suffix(entry.name)) {
+		if (entry.type != FS_DIR_ENTRY_FILE || !has_zapp_suffix(entry.name)) {
 			continue;
 		}
 
@@ -77,7 +77,7 @@ static int scan_dir(const char *dir, bool system, struct zd_app_entry *out, size
 
 		stem_of(entry.name, out[count].name, sizeof(out[count].name));
 		out[count].system = system;
-		LOG_DBG("discovered app '%s' at %s", out[count].name, out[count].path);
+		LOG_DBG("discovered zapp '%s' at %s", out[count].name, out[count].path);
 		count++;
 	}
 
@@ -85,7 +85,7 @@ static int scan_dir(const char *dir, bool system, struct zd_app_entry *out, size
 	return (int)count;
 }
 
-int zd_apps_discover(const struct zd_session *session, struct zd_app_entry *out,
+int zd_zapps_discover(const struct zd_session *session, struct zd_zapp_entry *out,
 		     size_t max)
 {
 	char dir[ZD_PATH_MAX];
@@ -107,9 +107,9 @@ int zd_apps_discover(const struct zd_session *session, struct zd_app_entry *out,
 	}
 
 	if ((size_t)count == max) {
-		LOG_WRN("app list truncated at %zu entries; some apps are not shown", max);
+		LOG_WRN("zapp list truncated at %zu entries; some zapps are not shown", max);
 	}
 
-	LOG_INF("discovered %d app(s)", count);
+	LOG_INF("discovered %d zapp(s)", count);
 	return count;
 }
