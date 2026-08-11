@@ -171,10 +171,56 @@ ABI, the WM, the handle registry or the permission shim changes.
 - Extensions build as **ELF shared objects** (`LLEXT_TYPE_ELF_SHAREDLIB` is the
   Xtensa default), not the relocatable objects ARM produces.
 - DRAM is much tighter than the 512 KB SRAM figure suggests: the first build
-  overflowed `dram0_0_seg` by 24 KB. The LVGL pool is 32 KB here rather than 96.
-  The 8 MB of PSRAM is the real headroom — enabling `CONFIG_ESP_SPIRAM` and
-  placing the LVGL pool there via `LV_Z_MEMORY_POOL_ZEPHYR_REGION` would remove
-  the constraint. Not done yet.
+  overflowed `dram0_0_seg` by 24 KB, and the LVGL pool had to be cut from the
+  96 KB the QEMU target uses to 32 KB. Fixed by moving LVGL to PSRAM -- below.
+
+## The 8 MB of PSRAM, and why it is QUAD
+
+`CONFIG_ESP_SPIRAM=y` brings up the module's 8 MB, and two LVGL options move
+both the widget pool and the rendering buffers into it:
+
+```
+CONFIG_ESP_SPIRAM=y
+CONFIG_SPIRAM_MODE_QUAD=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_LV_Z_MEMORY_POOL_CUSTOM_SECTION=y   /* pool    -> .lvgl_heap */
+CONFIG_LV_Z_VDB_CUSTOM_SECTION=y           /* buffers -> .lvgl_buf  */
+CONFIG_LV_Z_MEM_POOL_SIZE=98304            /* 32 KB -> 96 KB, as on QEMU */
+```
+
+No custom linker script is needed even though those Kconfig options talk about
+one: Espressif's `soc/espressif/esp32s3/default.ld` already collects
+`.lvgl_heap*` and `.lvgl_buf*` into `.ext_ram.data`, the PSRAM-backed output
+section, and `esp_psram.c` zeroes that BSS after the chip is mapped. Nothing in
+the desktop changes -- LVGL allocates from the same `sys_heap`, which now lives
+somewhere else.
+
+Result, measured from the ELF:
+
+| | before | after |
+|---|---|---|
+| `.dram0.bss` | 59,520 | **11,824** |
+| LVGL pool | 32 KB, DRAM | **96 KB, PSRAM** |
+
+`_ext_ram_bss_start .. _ext_ram_bss_end` spans 113,664 bytes, which is exactly
+98,304 (pool) + 15,360 (320x240 x 2 bytes x the 10% `LV_Z_VDB_SIZE` default), so
+both really did move.
+
+**QUAD, not OCT, and this is the part to get right.** An 8 MB part sounds like it
+must be octal, and it is not: ESP-PSRAM64 is 64 Mbit over four lines. Choosing
+`SPIRAM_MODE_OCT` would claim GPIO33-37 for the extra data lines -- and this
+board drives its LCD and SD card on GPIO35, 36 and 37. Octal PSRAM and this
+display cannot coexist, for the same reason the D/C pin conflict above exists:
+the CoreS3 spends those pins elsewhere. 80 MHz is available only because the
+flash is already clocked there (`SPIRAM_SPEED_80M` depends on
+`ESPTOOLPY_FLASHFREQ_80M`).
+
+Confirmed on the device:
+
+```
+I (esp_psram): Found 8MB PSRAM device
+I (esp_psram): Speed: 80MHz
+```
 
 ## Building and flashing
 
@@ -365,5 +411,5 @@ a second architecture, by touch.
 slot upstream considers unusable whenever the screen is on. A zapp on this board
 is a file you can pull out, read on a laptop and replace.
 
-**Not exercised:** `CONFIG_ESP_SPIRAM`. 8 MB of PSRAM sits idle while the LVGL
-pool is squeezed to 32 KB in DRAM.
+...and the 8 MB of PSRAM, which now holds LVGL's pool and rendering buffers and
+gives 47 KB of DRAM back.

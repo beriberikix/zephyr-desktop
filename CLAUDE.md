@@ -50,6 +50,11 @@ Hardware targets, both building but not yet run on silicon:
   has none. Hence `CONFIG_ZD_ZAPP_LOAD_VIA_BUFFER`. Also Harvard, so
   `LLEXT_HEAP_SIZE` does not exist there.
 
+  PSRAM is on (`CONFIG_ESP_SPIRAM`), holding the LVGL pool and rendering
+  buffers via `.lvgl_heap`/`.lvgl_buf`, which Espressif's linker script already
+  routes to `.ext_ram.data`. It must stay **`SPIRAM_MODE_QUAD`** — octal claims
+  GPIO33-37, and this board drives the LCD and SD on 35/36/37.
+
   **GPIO35 is both SPI2 MISO and the LCD's D/C line**, so the display driver's
   output claim stops the card answering CMD8 at all — upstream's answer for the
   SE variant is to disable the display. `app/src/host/bus_arb.c` borrows the pin
