@@ -132,7 +132,7 @@ panel reaches LVGL with no code of ours:
 ```
 zephyr,display = &ili9342c;      /* 320x240 */
 zephyr,touch   = &ft6336_touch;  /* focaltech,ft5336 */
-sdmmc-disk, disk-name = "SD"     /* -> CONFIG_ZD_FS_ROOT="/SD:" */
+sdmmc-disk, disk-name = "SD"     /* present, but unusable -- see below */
 ```
 
 Note the touch controller does **not** appear in the board's Supported Features
@@ -187,17 +187,105 @@ west build -p -b m5stack_cores3/esp32s3/procpu app -d build-cores3
 west flash -d build-cores3
 ```
 
-Builds clean at **513 KB flash**. Prepare a FAT-formatted microSD exactly as for
-the RT1060, but copy the **CoreS3** artifacts — `build-cores3/*.llext` are Xtensa
-shared objects and the aarch64 or Cortex-M7 ones will be refused at relocation:
+Builds clean at **513 KB flash**. Prepare a FAT-formatted microSD, or just
+insert a blank FAT card: with the pin arbiter below the desktop writes its
+built-in zapps to `/SD:/system/zapps` on first boot, which is also how the write
+path gets exercised. Copy the **CoreS3** artifacts if you place them by hand --
+`build-cores3/*.llext` are Xtensa shared objects, and the aarch64 or Cortex-M7
+ones are refused at relocation:
 
 ```
-/system/zapps/hello.llext    <- copy build-cores3/hello.llext
-/system/zapps/notes.llext    <- copy build-cores3/notes.llext
-/system/share/
-/home/user/zapps/
-/tmp/
+/SD:/system/zapps/hello.llext   <- copy build-cores3/hello.llext
+/SD:/system/zapps/notes.llext   <- copy build-cores3/notes.llext
+/SD:/system/share/
+/SD:/home/user/zapps/
+/SD:/tmp/
 ```
+
+An existing file of the right size is left alone, so a zapp you replaced by hand
+survives a reboot. Auto-format stays off: a card we cannot read is an unreadable
+card, not an invitation to reformat someone's photos.
+
+A good boot:
+
+```
+mounted /SD:
+selftest: all checks passed
+discovered 3 zapp(s)
+touch device ft5336@38: ready
+zephyr-desktop up on ili9342c@0
+```
+
+## GPIO35 is both SPI MISO and the display's D/C line
+
+This board wires one pin to two jobs, and out of the box that means the SD card
+does not work at all. In the board DTS, `mipi_dbi` has
+`dc-gpios = <&gpio1 3>` -- GPIO35 -- while SPI2's pinctrl claims
+`SPIM2_MISO_GPIO35`. The display driver configures the pin as an output at init
+and never lets go, so the card can never drive a reply:
+
+```
+sd: Card does not support CMD8, assuming legacy card
+sd: No OCR
+fs: fs mount error (-5)
+```
+
+Two different cards, identical failure. It is a hardware fact, not a
+configuration mistake, and it reproduces against stock Zephyr with one Kconfig:
+
+| Build | Result |
+|---|---|
+| `samples/subsys/fs/fs_sample` | lists the card's files |
+| `samples/subsys/fs/fs_sample -DCONFIG_DISPLAY=y` | CMD8 rejected, no OCR, mount -5 |
+
+Upstream's answer is to give up one of the two: the `m5stack_cores3/esp32s3/procpu/se`
+variant ships with `&mipi_dbi { status = "disabled"; }` and a comment telling you
+to delete `SPIM2_MISO_GPIO35` from pinctrl if you want the screen instead.
+
+### What we do instead
+
+Arduino's M5GFX keeps both alive by flipping the pin's direction on every
+chip-select change. `CONFIG_ZD_SPI_DC_MISO_ARBITER` is the same trick at a
+coarser grain -- a desktop's panel is idle for the whole of a file read, so the
+window can be a logical operation rather than a transaction:
+
+```
+acquire   pinctrl_apply_state(spi2, DEFAULT)   GPIO35 -> FSPIQ input
+   ...    the whole filesystem operation
+release   gpio_pin_configure_dt(dc, OUTPUT)    GPIO35 -> D/C output
+```
+
+Re-applying the bus's own pinctrl state is what makes this small. The pinmux
+entry `SPIM2_MISO_GPIO35` is `ESP32_PINMUX(35, ESP_FSPIQ_IN, ESP_NOSIG)` -- an
+input signal and *no* output signal -- so Zephyr's ESP32 pinctrl backend calls
+`gpio_ll_output_disable()` for it, undoing precisely what the display driver did.
+Naming the SPI node rather than the pin keeps the devicetree authoritative; a
+`BUILD_ASSERT` checks the display and the card really are on one controller.
+Restoring D/C only has to restore the *direction*, because `mipi_dbi_spi` sets
+the level explicitly before every transfer.
+
+Two things make it safe rather than merely lucky:
+
+- **The LVGL mutex is held for the window.** Nothing can drive the panel while
+  the pin is pointed at the card. It is recursive for the desktop thread, which
+  already holds it when a zapp launch runs inside `lv_timer_handler()`, and it
+  is what protects the nesting counter without a second lock.
+- **It brackets whole operations, in four places** -- mount, `ensure_home`,
+  discovery, and the zapp image read -- rather than individual `fs_*` calls.
+  Each is a thin wrapper around a renamed static, so there is no early-return
+  path that can leak the pin.
+
+`ZD_SPI_DC_MISO_ARBITER` depends on `ZD_ZAPP_LOAD_VIA_BUFFER`, and that
+dependency is load-bearing: the arbiter can only bracket filesystem calls this
+project makes itself, and `llext_fs_loader` reads the ELF from inside
+`llext_load()` where there is nothing to wrap. Xtensa needed the buffer loader
+anyway, so the two constraints happen to agree here -- they would not on a
+hypothetical ARM board with the same wiring.
+
+Measured on the device: mount, seed of three zapps, discovery, and a zapp loaded
+off the card with the desktop already running and drawing. Then 100 further card
+reads issued from the main loop *between rendered frames* -- zero failures, no
+display corruption.
 
 ## Layout at 320x240
 
@@ -217,9 +305,16 @@ y=239`; the button's drawn bounds are `x 3..61, y 216..236`. The x is dead on
 and the y misses low every time -- a 20 px control at the very bottom edge of a
 240 px screen is not reachable with a fingertip, and the panel edge is where
 accuracy is worst. `CONFIG_ZD_TOUCH_SLOP_PX=12` grows the *hit area* of the
-launcher button, window close boxes and menu items via
-`lv_obj_set_ext_click_area()`. No drawn pixel moves; the chrome stays exact.
-Defaults to 0, so pointer-driven targets are unaffected.
+launcher button and window close boxes via `lv_obj_set_ext_click_area()`. No
+drawn pixel moves; the chrome stays exact. Defaults to 0, so pointer-driven
+targets are unaffected.
+
+Slop is wrong for a *list*, though, and applying it to the launcher menu made
+things worse: 12 px of slop on 18 px rows makes all three rows overlap
+completely, and LVGL awards an overlapping hit to the last-added child -- so
+every tap anywhere in the menu launched `badabi`. Menu rows grow instead
+(`ITEM_H = 18 + CONFIG_ZD_TOUCH_SLOP_PX`). The rule: **isolated controls get a
+bigger hit box, adjacent ones get bigger bodies.**
 
 **2. The system workqueue stack, which is the real one.** The touch driver's
 work runs on the system workqueue, whose stack defaults to **1 KB**. With
@@ -253,20 +348,22 @@ press/release bursts, zero faults.
 
 ## What has and has not run on hardware
 
-**Confirmed on the device:** boot, the ili9342c display, the full 15-check
-selftest on Xtensa, the FT6336 touch panel, and the launcher opening on tap.
-
-**Not yet exercised:** everything downstream of the SD card. The mount fails --
+**Confirmed on the device, end to end:** boot; the ili9342c display; the full
+15-check selftest on Xtensa; the FT6336 touch panel; the launcher opening on tap
+and listing the three discovered zapps; tapping `hello`, which reads the `.llext`
+off the filesystem, relocates an **Xtensa shared object** through the buffer
+loader into the Harvard instruction/data heaps, and draws
 
 ```
-sd: Card does not support CMD8, assuming legacy card
-fs: fs mount error (-5)
-mount /SD: failed (-5)
-auto-format is off; the volume must already hold a FAT filesystem
+hello world, Zephyr!
 ```
 
--- so `discovered 0 zapp(s)`, and the buffer loader, Harvard llext heaps and
-Xtensa shared-object relocation remain untested on silicon. Insert a
-FAT-formatted card with the layout above and watch for `mounted /SD:`,
-`discovered N zapp(s)`, `llext: Loaded extension hello`, then
-`[Hello] hello world, Zephyr!`.
+in a retro window on a 320×240 touchscreen. That is the MVP success criterion on
+a second architecture, by touch.
+
+...and the microSD card underneath all of it, through the pin arbiter, from a
+slot upstream considers unusable whenever the screen is on. A zapp on this board
+is a file you can pull out, read on a laptop and replace.
+
+**Not exercised:** `CONFIG_ESP_SPIRAM`. 8 MB of PSRAM sits idle while the LVGL
+pool is squeezed to 32 KB in DRAM.

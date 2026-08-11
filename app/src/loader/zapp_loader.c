@@ -12,6 +12,7 @@
 #include <zephyr/fs/fs.h>
 #include <zephyr/logging/log.h>
 
+#include "../host/bus_arb.h"
 #include "zapp_loader.h"
 #include "../host/storage.h"
 
@@ -85,8 +86,8 @@ static int scan_dir(const char *dir, bool system, struct zd_zapp_entry *out, siz
 	return (int)count;
 }
 
-int zd_zapps_discover(const struct zd_session *session, struct zd_zapp_entry *out,
-		     size_t max)
+static int zapps_discover(const struct zd_session *session, struct zd_zapp_entry *out,
+			  size_t max)
 {
 	char dir[ZD_PATH_MAX];
 	int count = 0;
@@ -112,4 +113,16 @@ int zd_zapps_discover(const struct zd_session *session, struct zd_zapp_entry *ou
 
 	LOG_INF("discovered %d zapp(s)", count);
 	return count;
+}
+
+int zd_zapps_discover(const struct zd_session *session, struct zd_zapp_entry *out,
+		     size_t max)
+{
+	int ret;
+
+	zd_bus_storage_acquire();
+	ret = zapps_discover(session, out, max);
+	zd_bus_storage_release();
+
+	return ret;
 }

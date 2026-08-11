@@ -17,6 +17,7 @@
 #include <zephyr/logging/log.h>
 
 #include "zapp_instance.h"
+#include "../host/bus_arb.h"
 #include "../host/host_api.h"
 #include "../wm/handle.h"
 
@@ -92,7 +93,7 @@ static int validate_manifest(const struct zd_zapp_manifest *manifest, const char
  * allocated for as long as the zapp is loaded -- so it is owned by the instance
  * and freed in unwind_image(), not here.
  */
-static int read_whole_file(const char *path, void **out, size_t *out_len)
+static int read_file(const char *path, void **out, size_t *out_len)
 {
 	struct fs_dirent entry;
 	struct fs_file_t file;
@@ -130,6 +131,17 @@ static int read_whole_file(const char *path, void **out, size_t *out_len)
 	*out = buf;
 	*out_len = entry.size;
 	return 0;
+}
+
+static int read_whole_file(const char *path, void **out, size_t *out_len)
+{
+	int ret;
+
+	zd_bus_storage_acquire();
+	ret = read_file(path, out, out_len);
+	zd_bus_storage_release();
+
+	return ret;
 }
 #endif /* CONFIG_ZD_ZAPP_LOAD_VIA_BUFFER */
 

@@ -32,6 +32,7 @@ target_sources(app PRIVATE
   src/wm/handle.c
 )
 
+target_sources_ifdef(CONFIG_ZD_SPI_DC_MISO_ARBITER app PRIVATE src/host/bus_arb.c)
 target_sources_ifdef(CONFIG_ZD_SELFTEST app PRIVATE src/selftest.c)
 target_sources_ifdef(CONFIG_ZD_TOUCH_PROBE app PRIVATE src/touch_probe.c)
 target_sources_ifdef(CONFIG_ZD_SEED_BUILTIN_ZAPPS app PRIVATE src/loader/seed.c)

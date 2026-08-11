@@ -109,6 +109,23 @@ config ZD_SELFTEST
 	  handles. A shim that silently accepts everything looks exactly like one
 	  that works, so these run on the target rather than in a test directory.
 
+config ZD_SPI_DC_MISO_ARBITER
+	bool "Take the shared SPI MISO pin back from the display for storage"
+	depends on DISK_DRIVER_SDMMC && PINCTRL && LV_Z_LVGL_MUTEX
+	depends on ZD_ZAPP_LOAD_VIA_BUFFER
+	select PINCTRL_NON_STATIC
+	help
+	  For boards that wire one pin to both SPI MISO and the display's
+	  data/command line -- the M5Stack CoreS3 does this with GPIO35. The
+	  display driver claims the pin as an output at init and the card can
+	  then never answer, so every filesystem operation has to borrow it
+	  back and give it up again. See app/src/host/bus_arb.c.
+
+	  Depends on ZD_ZAPP_LOAD_VIA_BUFFER because the arbiter can only
+	  bracket filesystem calls this project makes itself. The llext fs
+	  loader reads the ELF from inside llext_load(), where there is nothing
+	  to wrap; the buffer loader reads the file here first.
+
 config LLEXT_EXPORT_SYMBOL_GROUP_DESKTOP
 	bool "Export the zephyr-desktop host API to extensions"
 	default y

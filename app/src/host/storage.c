@@ -14,6 +14,7 @@
 #include <zephyr/logging/log.h>
 #include <ff.h>
 
+#include "bus_arb.h"
 #include "storage.h"
 
 LOG_MODULE_DECLARE(zd_main, CONFIG_ZD_LOG_LEVEL);
@@ -53,7 +54,7 @@ static int ensure_dir(const char *path)
 	return 0;
 }
 
-int zd_storage_init(void)
+static int storage_init(void)
 {
 	static const char *const dirs[] = {
 		ZD_PATH_SYSTEM,       ZD_PATH_SYSTEM_ZAPPS, ZD_PATH_SYSTEM_SHARE,
@@ -83,7 +84,18 @@ int zd_storage_init(void)
 	return 0;
 }
 
-int zd_storage_ensure_home(const char *home)
+int zd_storage_init(void)
+{
+	int ret;
+
+	zd_bus_storage_acquire();
+	ret = storage_init();
+	zd_bus_storage_release();
+
+	return ret;
+}
+
+static int storage_ensure_home(const char *home)
 {
 	char apps[ZD_PATH_MAX];
 	int ret;
@@ -99,4 +111,15 @@ int zd_storage_ensure_home(const char *home)
 	}
 
 	return ensure_dir(apps);
+}
+
+int zd_storage_ensure_home(const char *home)
+{
+	int ret;
+
+	zd_bus_storage_acquire();
+	ret = storage_ensure_home(home);
+	zd_bus_storage_release();
+
+	return ret;
 }

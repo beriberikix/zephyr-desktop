@@ -43,11 +43,19 @@ Hardware targets, both building but not yet run on silicon:
 
 - `mimxrt1060_evk/mimxrt1062/qspi` — headless (no panel yet), FAT on SD.
   `CONFIG_LV_USE_PXP` is the eventual 2D-accel experiment.
-- `m5stack_cores3/esp32s3/procpu` — 320x240 touchscreen, SD, and the only
-  **non-ARM** target. Xtensa cannot stream zapps off the filesystem: it needs
-  writable llext storage, which needs a `peek()`-capable loader, and
-  `llext_fs_loader` has none. Hence `CONFIG_ZD_ZAPP_LOAD_VIA_BUFFER`. Also
-  Harvard, so `LLEXT_HEAP_SIZE` does not exist there. See `docs/hardware.md`.
+- `m5stack_cores3/esp32s3/procpu` — 320x240 touchscreen, microSD, the only
+  **non-ARM** target, and the one that has actually run the whole MVP on
+  silicon. Xtensa cannot stream zapps off the filesystem: it needs writable
+  llext storage, which needs a `peek()`-capable loader, and `llext_fs_loader`
+  has none. Hence `CONFIG_ZD_ZAPP_LOAD_VIA_BUFFER`. Also Harvard, so
+  `LLEXT_HEAP_SIZE` does not exist there.
+
+  **GPIO35 is both SPI2 MISO and the LCD's D/C line**, so the display driver's
+  output claim stops the card answering CMD8 at all — upstream's answer for the
+  SE variant is to disable the display. `app/src/host/bus_arb.c` borrows the pin
+  back around each filesystem operation instead. Add a filesystem call site on
+  this board and it must be bracketed, or it will read from a pin pointed at the
+  screen. See `docs/hardware.md`.
 
 ## Zephyr version
 

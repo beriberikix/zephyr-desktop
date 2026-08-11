@@ -12,6 +12,7 @@
 #include <zephyr/logging/log.h>
 
 #include "seed.h"
+#include "../host/bus_arb.h"
 #include "../host/storage.h"
 
 LOG_MODULE_DECLARE(zd_main, CONFIG_ZD_LOG_LEVEL);
@@ -84,7 +85,7 @@ static int install_one(const struct builtin *app)
 	return 0;
 }
 
-int zd_seed_install(void)
+static int seed_install(void)
 {
 	int ret = 0;
 
@@ -95,6 +96,17 @@ int zd_seed_install(void)
 			ret = one;
 		}
 	}
+
+	return ret;
+}
+
+int zd_seed_install(void)
+{
+	int ret;
+
+	zd_bus_storage_acquire();
+	ret = seed_install();
+	zd_bus_storage_release();
 
 	return ret;
 }

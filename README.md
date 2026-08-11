@@ -33,10 +33,12 @@ Verified over 20 consecutive launch/close cycles: 20 loads, 20 unloads, zero
 errors, and after every one — 0 windows live, 8 slab blocks free, 0 zapps live,
 0 handles live.
 
-Two hardware targets build but have not been run on silicon yet — the
-`mimxrt1060_evk` (324 KB flash, headless) and the **M5Stack CoreS3**
-(513 KB flash, 320×240 touchscreen, and the project's second architecture). See
-[docs/hardware.md](docs/hardware.md).
+It also runs **on hardware**: the whole criterion above, by touch, on an
+**M5Stack CoreS3** — 320×240 touchscreen, Xtensa rather than ARM, zapps loaded
+off a microSD card. Getting the card working meant arbitrating GPIO35, which
+this board wires to both SPI MISO and the LCD's D/C line; upstream's own answer
+is to disable the display. The `mimxrt1060_evk` builds (324 KB, headless) but
+has not been run on silicon. See [docs/hardware.md](docs/hardware.md).
 
 ## Quick start
 
