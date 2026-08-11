@@ -56,7 +56,7 @@ static int hello_init(zd_app_ctx_t ctx, const struct zd_host_api *api)
 		return -1;
 	}
 
-	if (api->label_create(ctx, window, "hello world", 8, 8) == NULL) {
+	if (api->label_create(ctx, window, "hello world, Zephyr!", 8, 8) == NULL) {
 		return -1;
 	}
 
@@ -65,7 +65,7 @@ static int hello_init(zd_app_ctx_t ctx, const struct zd_host_api *api)
 	 */
 	api->set_user_data(ctx, (void *)window);
 
-	api->log(ctx, 0, "hello world");
+	api->log(ctx, 0, "hello world, Zephyr!");
 	return 0;
 }
 
