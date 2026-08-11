@@ -79,6 +79,23 @@ static int validate_manifest(const struct zd_app_manifest *manifest, const char 
 	return 0;
 }
 
+/* Drop this instance's reference to the image, running .fini_array only if we
+ * are the last holder. Shared with the failure paths in zd_app_launch().
+ */
+static void unwind_image(struct zd_app_instance *inst)
+{
+	if (inst->ext == NULL) {
+		return;
+	}
+
+	if (inst->ext->use_count == 1) {
+		llext_teardown(inst->ext);
+	}
+
+	llext_unload(&inst->ext);
+	inst->ext = NULL;
+}
+
 int zd_app_launch(const struct zd_app_entry *entry)
 {
 	struct instance_slot *slot;
@@ -106,33 +123,43 @@ int zd_app_launch(const struct zd_app_entry *entry)
 
 	struct llext_load_param param = LLEXT_LOAD_PARAM_DEFAULT;
 
+	/* llext refcounts by name. A negative return is a real failure; zero
+	 * means we loaded it; a positive value is the PREVIOUS use count, i.e.
+	 * this image was already resident and we are now sharing it. Treating
+	 * "already loaded" as an error is an easy and silent mistake -- it makes
+	 * the second instance of any app fail to start.
+	 */
 	ret = llext_load(inst->loader, entry->name, &inst->ext, &param);
-	if (ret != 0) {
+	if (ret < 0) {
 		LOG_ERR("llext_load('%s') failed (%d)", entry->path, ret);
 		return ret;
 	}
 
-	/* Runs .init_array. Must happen before any symbol is called. */
-	ret = llext_bringup(inst->ext);
-	if (ret != 0) {
-		LOG_ERR("llext_bringup('%s') failed (%d)", entry->name, ret);
-		llext_unload(&inst->ext);
-		return ret;
+	inst->owns_image = (ret == 0);
+
+	if (inst->owns_image) {
+		/* .init_array runs once per image, not once per instance. */
+		ret = llext_bringup(inst->ext);
+		if (ret != 0) {
+			LOG_ERR("llext_bringup('%s') failed (%d)", entry->name, ret);
+			llext_unload(&inst->ext);
+			return ret;
+		}
+	} else {
+		LOG_DBG("'%s' image already resident; sharing it", entry->name);
 	}
 
 	sym = llext_find_sym(&inst->ext->exp_tab, ZD_APP_MANIFEST_SYM);
 	if (sym == NULL) {
 		LOG_ERR("'%s' exports no %s", entry->name, ZD_APP_MANIFEST_SYM);
-		llext_teardown(inst->ext);
-		llext_unload(&inst->ext);
+		unwind_image(inst);
 		return -ENOEXEC;
 	}
 
 	manifest = sym;
 	ret = validate_manifest(manifest, entry->path);
 	if (ret != 0) {
-		llext_teardown(inst->ext);
-		llext_unload(&inst->ext);
+		unwind_image(inst);
 		return ret;
 	}
 
@@ -151,9 +178,11 @@ int zd_app_launch(const struct zd_app_entry *entry)
 	/* Everything the app does from here can call back into the host API, so
 	 * the guard has to be held across init exactly as across an event.
 	 */
+	inst->initialising = true;
 	loader_wm->in_app_callback++;
 	ret = manifest->init(&inst->ctx, zd_host_api_for(inst));
 	loader_wm->in_app_callback--;
+	inst->initialising = false;
 
 	if (ret != 0) {
 		LOG_ERR("'%s' init failed (%d); unloading", inst->name, ret);
@@ -161,12 +190,28 @@ int zd_app_launch(const struct zd_app_entry *entry)
 		return ret;
 	}
 
+	/* Creating a window focuses it, which would otherwise deliver
+	 * ZD_EV_WINDOW_FOCUS while init() is still running -- before the app has
+	 * had a chance to record the handle it was just given, so it cannot yet
+	 * recognise its own window. Events are suppressed during init and the
+	 * focus state is re-asserted here, once the app is fully constructed.
+	 */
+	if (loader_wm->focused != NULL && loader_wm->focused->owner == inst) {
+		struct zd_event ev = {
+			.type = ZD_EV_WINDOW_FOCUS,
+			.win = (zd_window_t)loader_wm->focused->handle,
+		};
+
+		zd_app_dispatch(inst, &ev);
+	}
+
 	return 0;
 }
 
 void zd_app_dispatch(struct zd_app_instance *inst, const struct zd_event *ev)
 {
-	if (!inst->live || inst->pending_unload || inst->manifest->event == NULL) {
+	if (!inst->live || inst->initialising || inst->pending_unload ||
+	    inst->manifest->event == NULL) {
 		return;
 	}
 
@@ -245,10 +290,8 @@ static void finish_unload(struct zd_app_instance *inst)
 	 */
 	zd_handle_free_all(inst);
 
-	if (inst->ext != NULL) {
-		llext_teardown(inst->ext); /* .fini_array */
-		llext_unload(&inst->ext);
-	}
+	/* Only the last instance sharing this image tears it down. */
+	unwind_image(inst);
 
 	inst->manifest = NULL;
 	inst->live = false;

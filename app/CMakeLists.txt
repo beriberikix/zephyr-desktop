@@ -33,6 +33,8 @@ target_sources(app PRIVATE
   src/wm/handle.c
 )
 
+target_sources_ifdef(CONFIG_ZD_SELFTEST app PRIVATE src/selftest.c)
+
 # --- apps ---------------------------------------------------------------------
 #
 # Apps are built by this CMake project but are separate ELF artifacts from
@@ -45,22 +47,41 @@ target_sources(app PRIVATE
 # `west build -t llext-edk` plus an independent CMake project. Keeping the ABI
 # header outside app/ is what makes that a move rather than a rewrite.
 
-set(ZD_HELLO_LLEXT ${PROJECT_BINARY_DIR}/hello.llext)
+# Each app is one source file: ARM/ARM64 default to LLEXT_TYPE_ELF_OBJECT.
+set(ZD_APP_NAMES hello notes badabi)
 
-add_llext_target(zd_app_hello
-  OUTPUT  ${ZD_HELLO_LLEXT}
-  SOURCES ${ZD_APPS}/hello/hello.c
-)
-llext_include_directories(zd_app_hello ${ZD_INCLUDE})
+foreach(zd_app ${ZD_APP_NAMES})
+  set(ZD_${zd_app}_LLEXT ${PROJECT_BINARY_DIR}/${zd_app}.llext)
+  add_llext_target(zd_app_${zd_app}
+    OUTPUT  ${ZD_${zd_app}_LLEXT}
+    SOURCES ${ZD_APPS}/${zd_app}/${zd_app}.c
+  )
+  llext_include_directories(zd_app_${zd_app} ${ZD_INCLUDE})
+
+  # WORKAROUND (Zephyr main @ e201b84b): add_llext_target's packaging step does
+  # not re-run when a source file changes. Its chain is
+  #   source -> .obj -> <target>_llext_proc (a custom TARGET) -> _debug.elf -> .llext
+  # and the _debug.elf command DEPENDS only on that phony target, with no
+  # file-level dependency on the object. So the .obj recompiles, the copy never
+  # re-runs, and the .llext silently stays stale -- an app edit ships the
+  # PREVIOUS binary with no warning. Verified: repeated incremental builds after
+  # editing an app leave the .llext untouched; only `west build -p` refreshes it.
+  #
+  # Re-attach the missing file dependency to the documented pkg_input property.
+  get_target_property(zd_pkg_input zd_app_${zd_app} pkg_input)
+  add_custom_command(OUTPUT ${zd_pkg_input} APPEND
+    DEPENDS ${ZD_APPS}/${zd_app}/${zd_app}.c ${ZD_INCLUDE}/zd/app_abi.h
+  )
+
+  generate_inc_file_for_target(app
+    ${ZD_${zd_app}_LLEXT}
+    ${ZEPHYR_BINARY_DIR}/include/generated/${zd_app}_llext.inc
+  )
+endforeach()
 
 # Embed the built extension so the desktop can install it to /system/apps on
 # first boot. Everything downstream still reads it back off the filesystem.
 #
-# generate_inc_file_for_target (not ..._for_gen_target) is deliberate: it wraps
-# the .inc in its own custom target and makes `app` depend on *that*. Passing
-# zd_app_hello instead makes app depend on the .llext but not on the .inc, and
-# seed.c then races the generator.
-generate_inc_file_for_target(app
-  ${ZD_HELLO_LLEXT}
-  ${ZEPHYR_BINARY_DIR}/include/generated/hello_llext.inc
-)
+# Note: generate_inc_file_for_target, not ..._for_gen_target. The latter makes
+# `app` depend on the .llext but not on the generated .inc, and seed.c then
+# races the generator.

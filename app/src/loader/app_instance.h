@@ -31,10 +31,13 @@ struct zd_app_instance {
 
 	uint32_t id;
 	uint32_t window_count;
+	void *user_data; /**< the app's per-instance slot; see zd_host_api */
 	char name[ZD_APP_NAME_MAX];
 
 	bool live;
+	bool initialising; /**< inside init(); no events may be delivered yet */
 	bool pending_unload;
+	bool owns_image; /**< true if this instance was the one that loaded the ELF */
 };
 
 /** Wire the loader to its WM and session. Call once at boot. */

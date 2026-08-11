@@ -15,9 +15,17 @@
 
 #include <zd/app_abi.h>
 
+/*
+ * `host` is genuinely per-app: every instance is handed the same table, so a
+ * file-scope variable is correct here.
+ *
+ * Per-INSTANCE state is a different matter. llext loads an image once and
+ * refcounts it, so launching this app twice shares this file's .data and .bss
+ * between both instances -- a second `static zd_window_t window` would be
+ * silently overwritten by whichever instance started last. Anything per
+ * instance goes through set_user_data()/get_user_data().
+ */
 static const struct zd_host_api *host;
-static zd_window_t window;
-static zd_label_t line;
 
 static int hello_init(zd_app_ctx_t ctx, const struct zd_host_api *api)
 {
@@ -42,15 +50,20 @@ static int hello_init(zd_app_ctx_t ctx, const struct zd_host_api *api)
 		return -1;
 	}
 
-	window = api->window_create(ctx, &desc);
+	zd_window_t window = api->window_create(ctx, &desc);
+
 	if (window == NULL) {
 		return -1;
 	}
 
-	line = api->label_create(ctx, window, "hello world", 8, 8);
-	if (line == NULL) {
+	if (api->label_create(ctx, window, "hello world", 8, 8) == NULL) {
 		return -1;
 	}
+
+	/* The handle is pointer-sized, so it rides in the slot directly and this
+	 * app needs no allocation at all.
+	 */
+	api->set_user_data(ctx, (void *)window);
 
 	api->log(ctx, 0, "hello world");
 	return 0;
@@ -62,6 +75,16 @@ static void hello_event(zd_app_ctx_t ctx, const struct zd_event *ev)
 	 * tracks focus, which the desktop only ever tells us about by calling
 	 * this function.
 	 */
+	zd_window_t mine = (zd_window_t)host->get_user_data(ctx);
+
+	/* Cross-check the event against our own recorded handle. With two
+	 * instances sharing this code, getting this wrong is how one instance
+	 * ends up retitling the other's window.
+	 */
+	if (ev->win != mine) {
+		return;
+	}
+
 	switch (ev->type) {
 	case ZD_EV_WINDOW_FOCUS:
 		host->window_set_title(ctx, ev->win, "Hello (active)");
@@ -77,8 +100,7 @@ static void hello_event(zd_app_ctx_t ctx, const struct zd_event *ev)
 static void hello_fini(zd_app_ctx_t ctx)
 {
 	host->log(ctx, 0, "goodbye");
-	window = NULL;
-	line = NULL;
+	host->set_user_data(ctx, NULL);
 }
 
 struct zd_app_manifest zd_app_manifest = {

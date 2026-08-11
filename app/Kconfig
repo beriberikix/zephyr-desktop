@@ -32,6 +32,15 @@ config ZD_MAX_WINDOWS_PER_APP
 	int "Maximum windows a single app instance may own"
 	default 4
 
+config ZD_SELFTEST
+	bool "Run the permission and handle checks at boot"
+	default y
+	help
+	  Exercises the paths that must refuse: traversal, out-of-root access,
+	  writes to the read-only system root, stale handles and cross-app
+	  handles. A shim that silently accepts everything looks exactly like one
+	  that works, so these run on the target rather than in a test directory.
+
 config LLEXT_EXPORT_SYMBOL_GROUP_DESKTOP
 	bool "Export the zephyr-desktop host API to extensions"
 	default y

@@ -23,6 +23,7 @@
 #include "shell/desktop.h"
 #include "shell/launcher.h"
 #include "shell/taskbar.h"
+#include "selftest.h"
 #include "wm/wm.h"
 
 LOG_MODULE_REGISTER(zd_main, CONFIG_ZD_LOG_LEVEL);
@@ -70,6 +71,7 @@ int main(void)
 	}
 	zd_storage_ensure_home(session.home);
 	zd_seed_install();
+	zd_selftest_run(&session);
 
 	lvgl_lock();
 	zd_theme_init();

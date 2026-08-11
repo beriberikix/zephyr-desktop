@@ -219,6 +219,22 @@ static int64_t api_uptime_ms(void)
 	return k_uptime_get();
 }
 
+static void api_set_user_data(zd_app_ctx_t ctx, void *data)
+{
+	struct zd_app_instance *inst = instance_of(ctx);
+
+	if (inst != NULL) {
+		inst->user_data = data;
+	}
+}
+
+static void *api_get_user_data(zd_app_ctx_t ctx)
+{
+	struct zd_app_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? inst->user_data : NULL;
+}
+
 static void *api_unsafe_lvgl_content(zd_app_ctx_t ctx, zd_window_t win)
 {
 	struct zd_client *client = window_of(ctx, win);
@@ -235,7 +251,8 @@ static void *api_unsafe_lvgl_content(zd_app_ctx_t ctx, zd_window_t win)
 	.window_set_geometry = api_window_set_geometry,                                    \
 	.window_get_geometry = api_window_get_geometry, .label_create = api_label_create,  \
 	.label_set_text = api_label_set_text, .path_resolve = api_path_resolve,            \
-	.log = api_log, .uptime_ms = api_uptime_ms
+	.log = api_log, .uptime_ms = api_uptime_ms, .set_user_data = api_set_user_data,      \
+	.get_user_data = api_get_user_data
 
 static const struct zd_host_api host_api_untrusted = {
 	ZD_HOST_API_COMMON,

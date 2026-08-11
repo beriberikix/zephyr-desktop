@@ -1,10 +1,11 @@
 # zephyr-desktop MVP — design doc + task list
 
-> **Status: milestones A-F complete — the MVP's core criterion is met.** Workspace pinned, target strategy proven end to end,
+> **Status: milestones A-G complete — the MVP's full success criterion is met.** Workspace pinned, target strategy proven end to end,
 > retro theme, taskbar, and a full stacking WM with drag, focus and deferred destruction
 > running on `qemu_cortex_a53`, plus a FAT filesystem, session, path-scoping shim and a
 > launcher that lists apps found on disk, and a real .llext app loaded at runtime that
-> opens a window and draws "hello world". Milestones G–H remain; see §7. Two findings from building A are folded in below, marked **[A]**.
+> opens a window and draws "hello world", two live instances of it, and a one-symbol
+> export surface. Only milestone H (hardware) remains; see §7. Two findings from building A are folded in below, marked **[A]**.
 
 ## Context
 
@@ -742,13 +743,43 @@ the loader to resolve a symbol from the export table — otherwise a broken
 **[F] `generate_inc_file_for_target`, not `..._for_gen_target`.** The latter makes `app`
 depend on the `.llext` but not on the generated `.inc`, so `seed.c` races the generator.
 
-### G — Two instances, and hardening *(demo: the full criterion, plus honesty)*
-25. `apps/hello2/hello2.c`; multi-instance of the same app with cascade placement;
-    per-instance window quota.
-26. Try `CONFIG_LLEXT_EXPORT_DEFAULT_GROUPS=n`; re-export only what hello world genuinely
-    needs. Record the resulting symbol list in `docs/abi.md`.
-27. Negative tests: ABI-major mismatch rejected; bad magic rejected; stale handle after
-    close returns `-EINVAL`; path escape via `../..` rejected; window quota enforced.
+### G — Two instances, and hardening — **DONE**
+25. ✅ `apps/notes` as the second app; two live instances of `hello` with cascade
+    placement; quota enforced at exactly 4 windows per instance.
+26. ✅ `CONFIG_LLEXT_EXPORT_DEFAULT_GROUPS=n`. **172 exported symbols → 1.** The risk
+    flagged in §9 as "may cascade" cost nothing, precisely because the ABI is a vtable:
+    apps import nothing but `zd_get_host_api`. `docs/abi.md` records the measurement.
+27. ✅ Negative tests. `apps/badabi` declares `ZD_ABI_MAJOR + 1` and is installed
+    alongside the working apps, so the version gate is exercised in the field rather
+    than in a test directory. `zd_selftest_run()` asserts the rest at boot: 15 checks
+    covering traversal, relative paths, out-of-root access, writes to the read-only
+    system root, component-boundary prefix matching, and five handle-registry
+    properties including that a stale handle does not resolve into the slot's new
+    occupant.
+
+**[G] Instances of one app share the image.** `llext_load()` refcounts by name, so
+launching an app twice loads the ELF once and both instances share its `.data` and
+`.bss`. A file-scope variable in an app is per-*app*, not per-instance. ABI 0.2 adds
+`set_user_data`/`get_user_data` for exactly this. Three loader consequences, all easy to
+get silently wrong: a positive `llext_load()` return means "already resident", not an
+error; `.init_array` runs once per image; `.fini_array` must run only for the last
+instance holding it.
+
+**[G] No events during `init()`.** Creating a window focuses it, which delivered
+`ZD_EV_WINDOW_FOCUS` before the app had recorded the handle it was mid-way through
+receiving — so the app could not recognise its own window. Now a documented ordering
+guarantee: events are suppressed during `init` and focus is re-asserted afterwards.
+
+**[G] Log drops can eat the evidence.** The boot burst overflowed the deferred log buffer
+and reported `--- 13 messages dropped ---`, silently swallowing the first three selftest
+results while the summary still said "all passed". `CONFIG_LOG_MODE_IMMEDIATE=y`. A
+self-test whose FAIL line can be dropped is worse than none.
+
+**[G] `add_llext_target` does not rebuild on source change** (Zephyr `main` @ `e201b84b`).
+The packaging step depends on a phony target with no file-level dependency on the object,
+so the `.obj` recompiles and the `.llext` stays stale — an app edit ships the *previous*
+binary silently. This invalidated one verification run before it was caught.
+`app/CMakeLists.txt` re-attaches the dependency to the documented `pkg_input` property.
 
 ### H — Hardware checkpoint, headless *(demo: same binary spine on a Cortex-M7)*
 28. `mimxrt1060_evk` board conf/overlay: `CONFIG_DUMMY_DISPLAY` + `zephyr,dummy-dc`,

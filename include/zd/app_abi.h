@@ -26,7 +26,7 @@ extern "C" {
 #endif
 
 #define ZD_ABI_MAJOR 0
-#define ZD_ABI_MINOR 1
+#define ZD_ABI_MINOR 2
 
 /** Longest absolute path the desktop will hand back or accept. */
 #define ZD_PATH_MAX 96
@@ -142,6 +142,24 @@ struct zd_host_api {
 	 * under pressure later. Using it welds the app to LVGL's ABI.
 	 */
 	void *(*unsafe_lvgl_content)(zd_app_ctx_t ctx, zd_window_t win);
+
+	/* --- ABI 0.2 ------------------------------------------------------ */
+
+	/**
+	 * Per-instance storage. Added in 0.2, and not a convenience.
+	 *
+	 * llext refcounts extensions by name: launching the same app twice loads
+	 * the image ONCE and hands both instances the same code, the same .data
+	 * and the same .bss. A file-scope variable in an app is therefore shared
+	 * across every instance of that app, and the second instance will
+	 * quietly stamp on the first one's state.
+	 *
+	 * Anything an app needs one copy of per instance goes here. Small values
+	 * can be stuffed in the pointer itself; larger state needs an allocation
+	 * the app owns and frees in fini().
+	 */
+	void (*set_user_data)(zd_app_ctx_t ctx, void *data);
+	void *(*get_user_data)(zd_app_ctx_t ctx);
 };
 
 /* --- the app's side ------------------------------------------------------- */
@@ -154,6 +172,11 @@ struct zd_host_api {
 
 /**
  * What an app exports, via LL_EXTENSION_SYMBOL(zd_app_manifest).
+ *
+ * Ordering guarantee: no event is delivered to event() until init() has
+ * returned. Creating a window focuses it, so without this an app would be told
+ * it has focus before it had recorded the handle it was just handed, and could
+ * not tell its own window from another instance's.
  *
  * ZD_APP_FLAG_WANTS_THREAD is defined but not honoured in the MVP. Apps are
  * callback-driven on the desktop thread, because hello world needs no thread
