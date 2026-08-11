@@ -16,4 +16,7 @@ target_sources(app PRIVATE
   src/shell/taskbar.c
   src/wm/wm.c
   src/wm/client.c
+  src/wm/stack.c
+  src/wm/focus.c
+  src/wm/drag.c
 )

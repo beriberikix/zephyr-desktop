@@ -37,9 +37,11 @@ int main(void)
 	zd_desktop_init(&layers);
 	zd_taskbar_init(layers.panel, NULL, NULL); /* launcher wired up at milestone E */
 	zd_wm_init(&wm, &layers);
+	zd_wm_desktop_attach_events(&wm);
 
 	/* Hardcoded until the loader can spawn windows on an app's behalf. */
 	zd_wm_window_create(&wm, "Hello", NULL);
+	zd_wm_window_create(&wm, "Second Window", NULL);
 	lvgl_unlock();
 
 	display_blanking_off(display);

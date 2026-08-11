@@ -77,10 +77,13 @@ struct zd_client *zd_wm_window_create(struct zd_wm *wm, const char *title,
 	}
 
 	zd_client_build(client, wm->layers->windows);
+	zd_wm_client_attach_events(client);
 
-	/* Newest window goes on top of the stacking list. */
+	/* Newest window goes on top of the stacking list, and takes focus. */
 	sys_dlist_prepend(&wm->stack, &client->node);
 	live_clients++;
+	zd_wm_restack(wm);
+	zd_wm_focus(wm, client);
 
 	LOG_DBG("window %u '%s' created at %d,%d %dx%d", client->id, client->title,
 		client->geom.x1, client->geom.y1, lv_area_get_width(&client->geom),
@@ -110,10 +113,16 @@ void zd_wm_window_close(struct zd_client *client)
 	 * even though its LVGL objects still exist until the reap.
 	 */
 	sys_dlist_remove(&client->node);
-	if (wm->focused == client) {
-		wm->focused = NULL;
-	}
 	lv_obj_add_flag(client->frame, LV_OBJ_FLAG_HIDDEN);
+
+	if (wm->focused == client) {
+		/* Hand focus to whatever is now on top, so closing the front
+		 * window leaves the desktop focused rather than blank.
+		 */
+		wm->focused = NULL;
+		client->focused = false;
+		zd_wm_focus(wm, zd_wm_top(wm));
+	}
 
 	sys_slist_append(&wm->reap_list, &client->reap_node);
 	LOG_DBG("window %u '%s' queued for reap", client->id, client->title);
@@ -122,6 +131,7 @@ void zd_wm_window_close(struct zd_client *client)
 void zd_wm_reap(struct zd_wm *wm)
 {
 	sys_snode_t *node;
+	uint32_t reaped = 0;
 
 	/* Never reap with an app frame on the stack: the return address may
 	 * point into text we are about to free.
@@ -137,6 +147,12 @@ void zd_wm_reap(struct zd_wm *wm)
 		zd_client_destroy_widgets(client);
 		k_mem_slab_free(&client_slab, (void *)client);
 		live_clients--;
+		reaped++;
+	}
+
+	if (reaped > 0) {
+		LOG_INF("reaped %u window(s); %u live, %u slab blocks free", reaped,
+			live_clients, k_mem_slab_num_free_get(&client_slab));
 	}
 }
 

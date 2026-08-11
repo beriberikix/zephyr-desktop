@@ -110,6 +110,33 @@ void zd_wm_window_close(struct zd_client *client);
 /** Destroy everything queued by zd_wm_window_close(). Never call from dispatch. */
 void zd_wm_reap(struct zd_wm *wm);
 
+/* --- stacking (stack.c) --- */
+
+/** Rewrite LVGL's child order from wm->stack. */
+void zd_wm_restack(struct zd_wm *wm);
+
+/** Move a client to the head of the stack and reproject. */
+void zd_wm_raise(struct zd_wm *wm, struct zd_client *client);
+
+/** Topmost client, or NULL if none. */
+struct zd_client *zd_wm_top(struct zd_wm *wm);
+
+/* --- focus and dispatch (focus.c) --- */
+
+/** Focus a client, or pass NULL to defocus everything. */
+void zd_wm_focus(struct zd_wm *wm, struct zd_client *client);
+
+/** Install the WM's single frame callback and bubble flags. */
+void zd_wm_client_attach_events(struct zd_client *client);
+
+/** Install the background's defocus handler. */
+void zd_wm_desktop_attach_events(struct zd_wm *wm);
+
+/* --- drag (drag.c) --- */
+
+/** Install titlebar drag handling. */
+void zd_wm_drag_attach(struct zd_client *client);
+
 /** Number of live clients. For leak assertions. */
 uint32_t zd_wm_client_count(const struct zd_wm *wm);
 

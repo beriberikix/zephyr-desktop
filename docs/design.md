@@ -1,8 +1,8 @@
 # zephyr-desktop MVP — design doc + task list
 
-> **Status: milestone A complete.** Workspace pinned, target strategy proven end to end,
-> retro theme and layer stack rendering on `qemu_cortex_a53`. Milestones B–H remain; see
-> §7. Two findings from building A are folded in below, marked **[A]**.
+> **Status: milestones A-D complete.** Workspace pinned, target strategy proven end to end,
+> retro theme, taskbar, and a full stacking WM with drag, focus and deferred destruction
+> running on `qemu_cortex_a53`. Milestones E–H remain; see §7. Two findings from building A are folded in below, marked **[A]**.
 
 ## Context
 
@@ -638,25 +638,48 @@ Each milestone ends in something you can look at.
   object per bevel. Drawing keeps one object per visual element and stays behind the draw
   layer, so a GPU draw unit still applies.
 
-### B — Menu bar and clock *(demo: retro desktop with a live taskbar)*
-5. `shell/taskbar.c` on `layer_panel`: bevelled bar, a launcher button (inert), a clock
-   label driven by an `lv_timer`.
+### B — Menu bar and clock — **DONE**
+5. ✅ `shell/taskbar.c`: raised "Start" button, sunken clock, `lv_timer` tick. The
+   launcher is inert but already routes clicks, which is what proves pointer input
+   reaches the panel layer.
 
-### C — One hardcoded window with decorations *(demo: a window that looks right)*
-6. `wm/wm.c` + `wm/client.c`: layers, client slab, `zd_wm_window_create()` building
-   frame/titlebar/title/close/content from the theme styles.
-7. `chrome/titlebar.c`: active + inactive titlebar styles, drawn close button.
-8. `main.c` opens one hardcoded window at boot.
+**[B]** The board has no RTC node and Zephyr has no PL031 driver, so there is no wall
+clock to read. The clock counts up from a fixed 9:41 rather than from zero — a display
+counting from 00:00 reads as a stopwatch, not a desktop. One function to swap for
+`rtc_get_time()` on hardware.
 
-### D — Drag, raise, focus *(demo: two windows overlapping correctly)*
-9. `wm/stack.c`: `sys_dlist_t` z-order + `zd_wm_restack()`; `lv_obj_move_foreground`
-   scoped to `layer_windows`.
-10. `wm/focus.c`: single `zd_wm_frame_event` on each frame with `EVENT_BUBBLE` children;
-    press → raise + focus; titlebar style swap; background click → defocus.
-11. `wm/drag.c`: WM-owned press/pressing/released drag, `geom` kept authoritative.
-12. `wm/handle.c` + deferred reap (`zd_wm_reap`, `reap_list`, `in_app_callback` depth).
-    Close button routes through it. **Two hardcoded windows; verify drag, z-order,
-    focus, and that closing leaks no slab entries.**
+**[B]** Press feedback silently did nothing at first: LVGL only invalidates on a state
+change when a *style* property depends on that state, and these bevels are draw
+callbacks. `zd_bevel_attach()` now requests the redraw explicitly on
+PRESSED/RELEASED/PRESS_LOST. Anything else state-dependent and custom-drawn needs the
+same treatment.
+
+### C — One hardcoded window with decorations — **DONE**
+6. ✅ `wm/wm.c` + `wm/client.c`, client slab, full chrome subtree.
+7. ✅ `chrome/titlebar.c`: active/inactive styles, close glyph drawn pixel by pixel and
+   nudged down-right while pressed, as Win95 does.
+8. ✅ Hardcoded window at boot.
+
+### D — Drag, raise, focus — **DONE**
+9. ✅ `wm/stack.c`: dlist z-order + `zd_wm_restack()` via `lv_obj_move_to_index()`,
+   walking bottom-to-top with ascending indices so the moves do not fight each other.
+10. ✅ `wm/focus.c`: one `frame_event` per frame, `EVENT_BUBBLE` on every child, press →
+    raise + focus, titlebar recolour, background press → defocus. Closing the focused
+    window hands focus to the new topmost rather than leaving the desktop blank.
+11. ✅ `wm/drag.c`: WM-owned drag with clamping that always keeps 60px of titlebar
+    reachable, so a window can never be stranded off-edge.
+12. ✅ Deferred reap verified end to end. Console shows `queued for reap`, then
+    `reaping`, then `reaped 1 window(s); 1 live, 7 slab blocks free` — slab accounting
+    exactly balanced.
+
+**[D] Reordering:** `wm/handle.c` (the generation-counted handle registry) moved to
+milestone F. It exists to validate handles crossing the app ABI, and there are no app
+handles until F; building it here would have been speculative. The deferred-reap half of
+task 12, which is the part with real risk, landed at C and is verified here.
+
+**[D]** A full N-cycle create/close leak assertion still wants an external trigger, so it
+lands at F task 24 where the launcher can spawn on demand. The single-cycle slab
+accounting is verified.
 
 ### E — Filesystem and discovery *(demo: launcher menu listing files found on disk)*
 13. Ramdisk node in the board overlay; FAT mount table in `main.c`; auto-mkfs; create
