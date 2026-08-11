@@ -4,7 +4,7 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(zephyr_desktop LANGUAGES C)
 
 set(ZD_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../include)
-set(ZD_APPS    ${CMAKE_CURRENT_SOURCE_DIR}/../apps)
+set(ZD_ZAPPS   ${CMAKE_CURRENT_SOURCE_DIR}/../zapps)
 
 # include/zd/ lives outside app/ on purpose: it is the app ABI, shared verbatim
 # with every extension, and it must survive apps moving to an out-of-tree build
@@ -35,9 +35,13 @@ target_sources(app PRIVATE
 target_sources_ifdef(CONFIG_ZD_SELFTEST app PRIVATE src/selftest.c)
 target_sources_ifdef(CONFIG_ZD_SEED_BUILTIN_APPS app PRIVATE src/loader/seed.c)
 
-# --- apps ---------------------------------------------------------------------
+# --- zapps --------------------------------------------------------------------
 #
-# Apps are built by this CMake project but are separate ELF artifacts from
+# Desktop apps live in zapps/ rather than apps/, so that nothing is confused with
+# Zephyr's own convention where app/ is the application source directory -- which
+# this project also has, one level up.
+#
+# They are built by this CMake project but are separate ELF artifacts from
 # zephyr.elf: one `west build` produces both the desktop image and hello.llext.
 # ARM/ARM64 default to LLEXT_TYPE_ELF_OBJECT, which permits exactly one source
 # file per extension -- fine for hello world, and lifted later by switching to
@@ -54,7 +58,7 @@ foreach(zd_app ${ZD_APP_NAMES})
   set(ZD_${zd_app}_LLEXT ${PROJECT_BINARY_DIR}/${zd_app}.llext)
   add_llext_target(zd_app_${zd_app}
     OUTPUT  ${ZD_${zd_app}_LLEXT}
-    SOURCES ${ZD_APPS}/${zd_app}/${zd_app}.c
+    SOURCES ${ZD_ZAPPS}/${zd_app}/${zd_app}.c
   )
   llext_include_directories(zd_app_${zd_app} ${ZD_INCLUDE})
 
@@ -70,7 +74,7 @@ foreach(zd_app ${ZD_APP_NAMES})
   # Re-attach the missing file dependency to the documented pkg_input property.
   get_target_property(zd_pkg_input zd_app_${zd_app} pkg_input)
   add_custom_command(OUTPUT ${zd_pkg_input} APPEND
-    DEPENDS ${ZD_APPS}/${zd_app}/${zd_app}.c ${ZD_INCLUDE}/zd/app_abi.h
+    DEPENDS ${ZD_ZAPPS}/${zd_app}/${zd_app}.c ${ZD_INCLUDE}/zd/app_abi.h
   )
 
   generate_inc_file_for_target(app

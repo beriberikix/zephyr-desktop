@@ -38,7 +38,7 @@ static const struct builtin builtins[] = {
 	{ .name = "hello", .data = hello_llext, .size = sizeof(hello_llext) },
 	{ .name = "notes", .data = notes_llext, .size = sizeof(notes_llext) },
 	/* Installed on purpose: the ABI version gate is only proven by an app
-	 * that has to be refused. See apps/badabi.
+	 * that has to be refused. See zapps/badabi.
 	 */
 	{ .name = "badabi", .data = badabi_llext, .size = sizeof(badabi_llext) },
 };

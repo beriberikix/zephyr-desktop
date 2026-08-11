@@ -37,7 +37,7 @@ A vtable rather than a pile of exported functions because it:
   bind safely against a newer host.
 - Anything else is a major bump.
 
-Both checks run in `validate_manifest()` before `init()` is called. `apps/badabi`
+Both checks run in `validate_manifest()` before `init()` is called. `zapps/badabi`
 exists solely to exercise the rejection path; it declares `ZD_ABI_MAJOR + 1` and
 is installed alongside the working apps so the gate is exercised in the field
 rather than in a test directory nobody runs. **If it ever launches, the gate is
@@ -133,7 +133,9 @@ Stated plainly so nobody mistakes the shim for more than it is:
 
 ## Build
 
-Apps are built by the desktop's CMake but are separate ELF artifacts. One
+Apps live in `zapps/` — not `apps/`, to keep them distinct from Zephyr's
+convention where `app/` is the application source directory, which this project
+also has. They are built by the desktop's CMake but are separate ELF artifacts. One
 `west build` produces `zephyr.elf` and `hello.llext`.
 
 ARM/ARM64 default to `LLEXT_TYPE_ELF_OBJECT`, which permits exactly **one source

@@ -582,9 +582,10 @@ zephyr-desktop/
       shell/    desktop.c taskbar.c launcher.c clock.c
       host/     host_api.c fs_shim.c session.c
       loader/   app_loader.c app_instance.c seed.c
-  apps/
+  zapps/                         # desktop apps. NOT apps/ -- see note below
     hello/hello.c                # one file — LLEXT_TYPE_ELF_OBJECT allows only one
-    hello2/hello2.c              # second trivial app, proves multi-instance/multi-app
+    notes/notes.c                # second app: multi-window, path_resolve
+    badabi/badabi.c              # declares a bad ABI major; must be refused
 ```
 
 Notes:
@@ -593,6 +594,10 @@ Notes:
   manifest at a pinned `main` commit ≥ 2026-06-15 (`e201b84b04e4` verified). Workspace is
   a *fresh* `west init -l`, separate from `really-native-sim/` — that tree carries your
   portability branches and must not be entangled.
+- **Desktop apps live in `zapps/`, not `apps/`.** `app/` is Zephyr's own convention
+  for the application source directory and this project has one, so a sibling `apps/`
+  reads as a typo for it every time. The `z` prefix costs nothing and removes the
+  ambiguity permanently.
 - Apps are built by the desktop's CMake via `add_llext_target` + `llext_include_directories(... ${CMAKE_CURRENT_SOURCE_DIR}/../include)`,
   but they are **separate ELF artifacts** from `zephyr.elf` from the first commit. One
   `west build` produces `zephyr.elf` and `hello.llext`. The migration to genuinely
@@ -716,7 +721,7 @@ match, menu. Milestone F replaces them with a genuine build artifact.
 18. ✅ `include/zd/app_abi.h` complete: vtable, manifest, events, version rule.
 19. ✅ `host/host_api.c` with `EXPORT_GROUP_SYMBOL(DESKTOP, zd_get_host_api)`.
 20. ✅ `wm/handle.c` — generation-counted registry with owner checks.
-21. ✅ `apps/hello/hello.c`, built by `add_llext_target` into a 2968-byte aarch64
+21. ✅ `zapps/hello/hello.c`, built by `add_llext_target` into a 2968-byte aarch64
     relocatable ELF.
 22. ✅ `loader/seed.c` installs it to `/system/apps` on first boot.
 23. ✅ `loader/app_instance.c` — the full lifecycle.
@@ -746,12 +751,12 @@ the loader to resolve a symbol from the export table — otherwise a broken
 depend on the `.llext` but not on the generated `.inc`, so `seed.c` races the generator.
 
 ### G — Two instances, and hardening — **DONE**
-25. ✅ `apps/notes` as the second app; two live instances of `hello` with cascade
+25. ✅ `zapps/notes` as the second app; two live instances of `hello` with cascade
     placement; quota enforced at exactly 4 windows per instance.
 26. ✅ `CONFIG_LLEXT_EXPORT_DEFAULT_GROUPS=n`. **172 exported symbols → 1.** The risk
     flagged in §9 as "may cascade" cost nothing, precisely because the ABI is a vtable:
     apps import nothing but `zd_get_host_api`. `docs/abi.md` records the measurement.
-27. ✅ Negative tests. `apps/badabi` declares `ZD_ABI_MAJOR + 1` and is installed
+27. ✅ Negative tests. `zapps/badabi` declares `ZD_ABI_MAJOR + 1` and is installed
     alongside the working apps, so the version gate is exercised in the field rather
     than in a test directory. `zd_selftest_run()` asserts the rest at boot: 15 checks
     covering traversal, relative paths, out-of-root access, writes to the read-only

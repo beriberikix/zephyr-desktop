@@ -92,9 +92,13 @@ struct zd_app_manifest zd_app_manifest = {
 LL_EXTENSION_SYMBOL(zd_app_manifest);
 ```
 
-No LVGL, no Zephyr, no idea where its window comes from or what draws it. Add
-the directory name to `ZD_APP_NAMES` in `app/CMakeLists.txt` and it builds as a
-separate `.llext` artifact.
+No LVGL, no Zephyr, no idea where its window comes from or what draws it. Drop
+it in `zapps/<name>/<name>.c`, add the name to `ZD_APP_NAMES` in
+`app/CMakeLists.txt`, and it builds as a separate `.llext` artifact.
+
+(`zapps/`, not `apps/`: Zephyr's convention is that `app/` holds the application
+source, and this project has one. A sibling `apps/` reads as a typo for it every
+single time.)
 
 Read [docs/abi.md](docs/abi.md) before writing a second one — particularly the
 part about instances of one app sharing `.bss`.
@@ -110,7 +114,7 @@ app/                the desktop image
   src/shell/        background, taskbar, launcher, clock
   src/host/         host-API vtable, fs shim, session, storage
   src/loader/       llext discover/load/instance/unload, boot seeding
-apps/               one .c file per app
+zapps/              desktop apps, one .c file each (not apps/ -- see below)
 tools/              headless screenshot and zoom harness
 ```
 

@@ -60,7 +60,8 @@ app/                the desktop image (the Zephyr application)
   src/shell/        background, taskbar, launcher, clock
   src/host/         host-API vtable, fs shim, session
   src/loader/       llext discover/load/instance/unload, boot seeding
-apps/               one .c file per app (LLEXT_TYPE_ELF_OBJECT allows only one)
+zapps/              desktop apps, one .c file each (ELF_OBJECT allows only one).
+                    Named zapps/, not apps/, so it is never misread as Zephyr's app/
 zephyr/ modules/    west-managed, gitignored
 ```
 
