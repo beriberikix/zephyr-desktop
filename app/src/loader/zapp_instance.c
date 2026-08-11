@@ -401,6 +401,60 @@ void zd_zapp_on_client_click(struct zd_client *client, int16_t x, int16_t y)
 	zd_zapp_dispatch(inst, &ev);
 }
 
+void zd_zapp_on_client_resized(struct zd_client *client, int16_t w, int16_t h)
+{
+	struct zd_zapp_instance *inst = client->owner;
+	struct zd_event ev = {
+		.type = ZD_EV_RESIZED,
+		.win = (zd_window_t)client->handle,
+		.resize = { .w = w, .h = h },
+	};
+
+	if (inst == NULL || client->handle == 0) {
+		return; /* desktop-internal window */
+	}
+
+	zd_zapp_dispatch(inst, &ev);
+}
+
+void zd_zapp_on_client_minimized(struct zd_client *client, bool minimized)
+{
+	struct zd_zapp_instance *inst = client->owner;
+	struct zd_event ev = {
+		.type = minimized ? ZD_EV_MINIMIZED : ZD_EV_RESTORED,
+		.win = (zd_window_t)client->handle,
+	};
+
+	if (inst == NULL || client->handle == 0) {
+		return; /* desktop-internal window */
+	}
+
+	zd_zapp_dispatch(inst, &ev);
+}
+
+bool zd_zapp_on_client_close_request(struct zd_client *client)
+{
+	struct zd_zapp_instance *inst = client->owner;
+	struct zd_event ev = {
+		.type = ZD_EV_WINDOW_CLOSE_REQUEST,
+		.win = (zd_window_t)client->handle,
+	};
+
+	/* Say no to the WM whenever nothing could act on the event, so the close
+	 * happens now instead of stalling for the whole grace period. That is a
+	 * desktop-internal window, a zapp with no event callback, or an instance
+	 * that is already on its way out -- zd_zapp_dispatch() would drop the
+	 * event in the last case, and the window would hang until the deadline.
+	 */
+	if (inst == NULL || client->handle == 0 || inst->manifest->event == NULL ||
+	    !inst->live || inst->initialising || inst->pending_unload) {
+		return false;
+	}
+
+	zd_zapp_dispatch(inst, &ev);
+	return true;
+}
+
 static void finish_unload(struct zd_zapp_instance *inst)
 {
 	LOG_DBG("unloading instance %u '%s'", inst->id, inst->name);

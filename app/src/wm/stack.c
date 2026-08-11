@@ -7,6 +7,11 @@
  * reading it back, is what makes always-on-top, minimise and per-zapp window
  * groups cheap to add later.
  *
+ * Minimise cashed that cheque. A minimised client keeps its node and its index;
+ * the only thing that changes is that the projection hides it. Restoring is
+ * therefore exact rather than approximate -- the window comes back exactly where
+ * it was in the order, because nothing ever removed it from the order.
+ *
  * SPDX-License-Identifier: Apache-2.0
  */
 
@@ -25,6 +30,19 @@ void zd_wm_restack(struct zd_wm *wm)
 		struct zd_client *client = CONTAINER_OF(node, struct zd_client, node);
 
 		lv_obj_move_to_index(client->frame, index++);
+
+		/* Mapped-ness is part of the projection too, so it is re-applied
+		 * from the model here rather than poked at the call sites. A
+		 * hidden frame is not hit-tested, which is what makes a
+		 * minimised window unclickable without any extra check in the
+		 * dispatch path.
+		 */
+		if (client->minimized) {
+			lv_obj_add_flag(client->frame, LV_OBJ_FLAG_HIDDEN);
+		} else {
+			lv_obj_remove_flag(client->frame, LV_OBJ_FLAG_HIDDEN);
+		}
+
 		node = sys_dlist_peek_prev(&wm->stack, node);
 	}
 }
@@ -49,5 +67,18 @@ struct zd_client *zd_wm_top(struct zd_wm *wm)
 {
 	sys_dnode_t *node = sys_dlist_peek_head(&wm->stack);
 
-	return node != NULL ? CONTAINER_OF(node, struct zd_client, node) : NULL;
+	/* A minimised client is unmapped, not gone: it keeps its node so that
+	 * restoring it puts it back exactly where it was. Everything asking for
+	 * "the top window" means the top *visible* one, so skip past them.
+	 */
+	while (node != NULL) {
+		struct zd_client *client = CONTAINER_OF(node, struct zd_client, node);
+
+		if (!client->minimized) {
+			return client;
+		}
+		node = sys_dlist_peek_next(&wm->stack, node);
+	}
+
+	return NULL;
 }

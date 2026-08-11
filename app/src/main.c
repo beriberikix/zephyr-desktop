@@ -23,6 +23,7 @@
 #include "shell/desktop.h"
 #include "shell/launcher.h"
 #include "shell/taskbar.h"
+#include "shell/tasklist.h"
 #include "selftest.h"
 #include "wm/wm.h"
 
@@ -107,8 +108,14 @@ int main(void)
 	wm.on_client_destroyed = zd_zapp_on_client_destroyed;
 	wm.on_client_focus = zd_zapp_on_client_focus;
 	wm.on_client_click = zd_zapp_on_client_click;
+	wm.on_client_resized = zd_zapp_on_client_resized;
+	wm.on_client_minimized = zd_zapp_on_client_minimized;
+	wm.on_client_close_request = zd_zapp_on_client_close_request;
+	zd_tasklist_init(layers.panel, &wm);
+	wm.on_client_list_changed = zd_tasklist_invalidate;
 	zd_zapp_loader_init(&wm, &session);
 	zd_launcher_init(&layers, &session, on_app_chosen, &wm);
+	zd_selftest_run_wm(&wm);
 	lvgl_unlock();
 
 	display_blanking_off(display);
@@ -132,6 +139,12 @@ int main(void)
 		 */
 		zd_wm_reap(&wm);
 		zd_zapp_reap();
+		/* And the taskbar last, so it rebuilds from a stack the reap has
+		 * already finished with rather than one still holding windows
+		 * that are about to disappear.
+		 */
+		zd_tasklist_reap();
+
 		uint32_t sleep_ms = lv_timer_handler();
 		lvgl_unlock();
 

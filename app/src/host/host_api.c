@@ -144,6 +144,30 @@ static int api_window_get_geometry(zd_zapp_ctx_t ctx, zd_window_t win, struct zd
 	return 0;
 }
 
+static int api_window_minimize(zd_zapp_ctx_t ctx, zd_window_t win)
+{
+	struct zd_client *client = window_of(ctx, win);
+
+	if (client == NULL) {
+		return -EINVAL;
+	}
+
+	zd_wm_window_minimize(client);
+	return 0;
+}
+
+static int api_window_restore(zd_zapp_ctx_t ctx, zd_window_t win)
+{
+	struct zd_client *client = window_of(ctx, win);
+
+	if (client == NULL) {
+		return -EINVAL;
+	}
+
+	zd_wm_window_restore(client);
+	return 0;
+}
+
 /* --- content --------------------------------------------------------------- */
 
 static zd_label_t api_label_create(zd_zapp_ctx_t ctx, zd_window_t win, const char *text,
@@ -391,7 +415,8 @@ static void *api_unsafe_lvgl_content(zd_zapp_ctx_t ctx, zd_window_t win)
 	.fs_sync = api_fs_sync, .fs_close = api_fs_close, .fs_opendir = api_fs_opendir,     \
 	.fs_readdir = api_fs_readdir, .fs_closedir = api_fs_closedir,                       \
 	.fs_stat = api_fs_stat, .fs_mkdir = api_fs_mkdir, .fs_unlink = api_fs_unlink,       \
-	.fs_rename = api_fs_rename
+	.fs_rename = api_fs_rename, .window_minimize = api_window_minimize,                 \
+	.window_restore = api_window_restore
 
 static const struct zd_host_api host_api_untrusted = {
 	ZD_HOST_API_COMMON,

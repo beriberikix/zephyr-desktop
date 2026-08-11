@@ -26,7 +26,7 @@ extern "C" {
 #endif
 
 #define ZD_ABI_MAJOR 0
-#define ZD_ABI_MINOR 3
+#define ZD_ABI_MINOR 4
 
 /** Longest absolute path the desktop will hand back or accept. */
 #define ZD_PATH_MAX 96
@@ -115,12 +115,23 @@ struct zd_dirent {
 
 /* --- events --------------------------------------------------------------- */
 
+/*
+ * These values are part of the binary contract: a zapp built against an older
+ * minor version compares against the numbers it was compiled with. New members
+ * are therefore APPENDED AT THE END, never inserted next to the events they are
+ * conceptually related to. Grouping ZD_EV_RESIZED with the other window events
+ * would have renumbered ZD_EV_CLICK and silently broken every 0.3 zapp.
+ */
 enum zd_event_type {
 	ZD_EV_WINDOW_SHOWN,
 	/**
-	 * Reserved. The MVP's window manager closes unconditionally and never
-	 * sends this, so no zapp can yet refuse or defer a close. Defined now so
-	 * the enum does not have to be renumbered when it starts being sent.
+	 * The user asked for this window to close. Delivered since 0.4.
+	 *
+	 * Close what you must, flush what you must, then call window_close().
+	 * This is an ask, not a veto: if you have not closed the window within
+	 * CONFIG_ZD_CLOSE_GRACE_MS, or the user hits the close box a second
+	 * time, the desktop closes it for you. Do not treat the grace period as
+	 * a place to wait for anything slower than a file sync.
 	 */
 	ZD_EV_WINDOW_CLOSE_REQUEST,
 	ZD_EV_WINDOW_FOCUS,
@@ -133,6 +144,28 @@ enum zd_event_type {
 	 */
 	ZD_EV_CLICK,
 	ZD_EV_KEY,   /**< reserved; not delivered in the MVP */
+
+	/* --- ABI 0.4 ------------------------------------------------------ */
+
+	/**
+	 * The content area has a new size, carried in ev->resize.
+	 *
+	 * Sent when the user lets go of the resize grip, not while they drag it,
+	 * and once for any window_set_geometry() that changed the size. The
+	 * cadence is deliberate: a zapp callback may do filesystem I/O, and on a
+	 * board where storage borrows the display's pin one of those per pointer
+	 * sample would be indefensible. The content area itself tracks the
+	 * pointer live; only your own widgets lag until the button comes up.
+	 */
+	ZD_EV_RESIZED,
+	/**
+	 * The window was minimised or restored. The pair to FOCUS/BLUR, and the
+	 * cue to stop doing work whose result nobody can see. A minimised window
+	 * is still yours: its handle stays valid and it keeps its place in the
+	 * stacking order.
+	 */
+	ZD_EV_MINIMIZED,
+	ZD_EV_RESTORED,
 };
 
 struct zd_event {
@@ -146,6 +179,14 @@ struct zd_event {
 		struct {
 			uint32_t code;
 		} key;
+		/** New content-area size for ZD_EV_RESIZED. Added in 0.4; the
+		 * union was already 4 bytes wide, so struct zd_event did not
+		 * change size and no zapp needs rebuilding.
+		 */
+		struct {
+			int16_t w;
+			int16_t h;
+		} resize;
 	};
 };
 
@@ -176,6 +217,12 @@ struct zd_host_api {
 	zd_window_t (*window_create)(zd_zapp_ctx_t ctx, const struct zd_window_desc *desc);
 	void (*window_close)(zd_zapp_ctx_t ctx, zd_window_t win);
 	int (*window_set_title)(zd_zapp_ctx_t ctx, zd_window_t win, const char *title);
+	/**
+	 * Move and resize. A w or h of 0 leaves that dimension alone; anything
+	 * below the desktop's minimum window size is raised to it, so check the
+	 * result with window_get_geometry() rather than assuming you got what
+	 * you asked for. A size change delivers ZD_EV_RESIZED before returning.
+	 */
 	int (*window_set_geometry)(zd_zapp_ctx_t ctx, zd_window_t win,
 				   const struct zd_rect *geom);
 	int (*window_get_geometry)(zd_zapp_ctx_t ctx, zd_window_t win, struct zd_rect *out);
@@ -266,6 +313,21 @@ struct zd_host_api {
 	int (*fs_unlink)(zd_zapp_ctx_t ctx, const char *path);
 	/** Both paths are scoped and both must be writable. */
 	int (*fs_rename)(zd_zapp_ctx_t ctx, const char *from, const char *to);
+
+	/* --- ABI 0.4: window state ----------------------------------------- */
+
+	/*
+	 * Minimising is not closing. The window keeps its handle, its contents
+	 * and its place in the stacking order; it is simply unmapped, so it
+	 * draws nowhere and cannot be clicked. Restoring puts it back where it
+	 * was in the stack and raises it to the front.
+	 *
+	 * The user can do both from the chrome and from the taskbar without
+	 * asking the zapp. These exist so a zapp can do it to itself, and so the
+	 * state it is told about in ZD_EV_MINIMIZED is one it can also set.
+	 */
+	int (*window_minimize)(zd_zapp_ctx_t ctx, zd_window_t win);
+	int (*window_restore)(zd_zapp_ctx_t ctx, zd_window_t win);
 };
 
 /* --- the zapp's side ------------------------------------------------------- */

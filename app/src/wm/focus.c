@@ -46,6 +46,11 @@ void zd_wm_focus(struct zd_wm *wm, struct zd_client *client)
 	} else {
 		LOG_DBG("focus -> none");
 	}
+
+	/* The taskbar draws the focused window's button pressed, so focus is a
+	 * list change even though the set of windows did not change.
+	 */
+	zd_wm_notify_list_changed(wm);
 }
 
 /* The one callback every frame gets. Children bubble here. */
@@ -93,11 +98,22 @@ static void close_event(lv_event_t *e)
 {
 	struct zd_client *client = lv_event_get_user_data(e);
 
-	/* Queues the window; the reap at the top of the desktop loop does the
-	 * deleting. Destroying here would free the LVGL object whose event
-	 * dispatch we are currently inside.
+	/* The polite form: the owning zapp is asked first and gets a bounded
+	 * grace period. Either way nothing is destroyed here -- the reap at the
+	 * top of the desktop loop does the deleting, because destroying now
+	 * would free the LVGL object whose event dispatch we are inside.
 	 */
-	zd_wm_window_close(client);
+	zd_wm_window_close_request(client);
+}
+
+static void minimize_event(lv_event_t *e)
+{
+	struct zd_client *client = lv_event_get_user_data(e);
+
+	/* No handshake here, and none wanted: minimising destroys nothing, so
+	 * there is nothing for a zapp to object to. It is told after the fact.
+	 */
+	zd_wm_window_minimize(client);
 }
 
 static void desktop_event(lv_event_t *e)
@@ -121,9 +137,12 @@ void zd_wm_client_attach_events(struct zd_client *client)
 	 */
 	lv_obj_add_flag(client->titlebar, bubble);
 	lv_obj_add_flag(client->title_label, bubble);
+	lv_obj_add_flag(client->min_btn, bubble);
 	lv_obj_add_flag(client->close_btn, bubble);
 	lv_obj_add_flag(client->content, bubble);
+	lv_obj_add_flag(client->grip, bubble);
 
+	lv_obj_add_event_cb(client->min_btn, minimize_event, LV_EVENT_CLICKED, client);
 	lv_obj_add_event_cb(client->close_btn, close_event, LV_EVENT_CLICKED, client);
 	lv_obj_add_event_cb(client->content, content_event, LV_EVENT_CLICKED, client);
 

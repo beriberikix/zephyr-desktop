@@ -18,6 +18,7 @@ LOG_MODULE_DECLARE(zd_main, CONFIG_ZD_LOG_LEVEL);
 #define ITEM_H     (ZD_TASKBAR_H - 8)
 #define ITEM_Y     4
 #define EDGE_PAD   3
+#define GAP        3 /**< between the launcher/clock and the window list */
 
 /*
  * qemu_cortex_a53 has no RTC node and Zephyr has no PL031 driver, so there is
@@ -121,4 +122,14 @@ void zd_taskbar_init(lv_obj_t *panel, zd_launcher_cb_t cb, void *cb_arg)
 void zd_taskbar_launcher_coords(lv_area_t *out)
 {
 	lv_obj_get_coords(launcher_btn, out);
+}
+
+void zd_taskbar_list_region(lv_area_t *out)
+{
+	int32_t screen_w = lv_display_get_horizontal_resolution(NULL);
+
+	out->x1 = EDGE_PAD + LAUNCHER_W + GAP;
+	out->y1 = ITEM_Y;
+	out->x2 = screen_w - CLOCK_W - EDGE_PAD - GAP - 1;
+	out->y2 = ITEM_Y + ITEM_H - 1;
 }

@@ -73,6 +73,17 @@ void zd_zapp_window_gone(struct zd_zapp_instance *inst);
 void zd_zapp_on_client_destroyed(struct zd_client *client);
 void zd_zapp_on_client_focus(struct zd_client *client, bool focused);
 void zd_zapp_on_client_click(struct zd_client *client, int16_t x, int16_t y);
+void zd_zapp_on_client_resized(struct zd_client *client, int16_t w, int16_t h);
+void zd_zapp_on_client_minimized(struct zd_client *client, bool minimized);
+
+/**
+ * @brief Ask a window's zapp to close itself.
+ *
+ * @return true if the request was delivered and the WM should wait for the
+ *         grace period; false if there was nobody to ask, in which case the
+ *         window should be closed immediately rather than stalling.
+ */
+bool zd_zapp_on_client_close_request(struct zd_client *client);
 
 /** Finish teardowns. Runs from the desktop loop, never from dispatch. */
 void zd_zapp_reap(void);

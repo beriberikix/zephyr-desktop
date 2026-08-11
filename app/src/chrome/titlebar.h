@@ -18,6 +18,9 @@ void zd_titlebar_set_active(lv_obj_t *titlebar, bool active);
 /** Draw the close button's glyph in DRAW_POST, on top of its bevel. */
 void zd_close_glyph_attach(lv_obj_t *obj);
 
+/** The same, for the minimise button. */
+void zd_minimize_glyph_attach(lv_obj_t *obj);
+
 extern lv_style_t zd_style_title_active;
 extern lv_style_t zd_style_title_inactive;
 

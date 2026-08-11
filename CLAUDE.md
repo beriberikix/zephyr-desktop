@@ -19,7 +19,13 @@ Two things are load-bearing and get real care. Everything else may be scrappy:
    WM. A `zd_client` struct plus one central dispatch path.
 2. **The zapp ABI** (`include/zd/zapp_abi.h`) — designed as if the terminal, text editor and
    file browser already ran on it. Implemented as far as hello world needs, plus storage
-   (ABI 0.3), which was the one designed-but-missing half.
+   (ABI 0.3), which was the one designed-but-missing half, plus window state — resize,
+   minimise and the close handshake (ABI 0.4).
+
+   The append-only rule covers `enum zd_event_type` as well as the vtable. New event
+   values go on the *end*, never next to the events they belong with: inserting one
+   renumbers everything after it and silently breaks zapps built against the older minor,
+   and no version gate would catch it.
 
 ## Target
 
@@ -78,9 +84,9 @@ tag. LVGL resolves to 9.6.0-dev.
 manifest/west.yml   the pin. This dir exists only so topdir can be the repo root.
 include/zd/         the app ABI. No Zephyr and no LVGL headers may appear here.
 app/                the desktop image (the Zephyr application)
-  src/wm/           client struct, stacking, focus, drag, handle registry
+  src/wm/           client struct, stacking, focus, drag/resize, handle registry
   src/chrome/       retro bevels, titlebar, palette
-  src/shell/        background, taskbar, launcher, clock
+  src/shell/        background, taskbar, launcher, clock, window list
   src/host/         host-API vtable, fs shim + zapp storage, session
   src/loader/       llext discover/load/instance/unload, boot seeding
 zapps/              desktop apps, one .c file each (ELF_OBJECT allows only one).
@@ -105,6 +111,22 @@ west build -t run                                     # opens a cocoa window
   LVGL subtree there — let alone `llext_unload()` — is a use-after-free. Everything goes
   through the deferred reap in `app/src/wm/`. This is the most likely source of faults in
   the whole project.
+
+  It has a second customer with no zapp in it: the taskbar window list. Clicking one of
+  its buttons changes focus, which fires `wm->on_client_list_changed`, which would
+  `lv_obj_clean()` the row holding the button currently dispatching. `shell/tasklist.c`
+  therefore only sets a dirty flag; `zd_tasklist_reap()` rebuilds from the desktop loop,
+  after `zd_wm_reap()`. Any new shell surface derived from the WM's state needs the same
+  treatment.
+- **Hit slop does not compose.** `lv_obj_set_ext_click_area()` is for an *isolated*
+  control — the Start button, where the space around it is dead. Adjacent controls must
+  instead be *bigger*: LVGL awards an overlap to the last-added child, so two 14 px
+  titlebar buttons 2 px apart with `CONFIG_ZD_TOUCH_SLOP_PX=12` send every tap to the
+  right-hand one. That bug has now been shipped twice (the launcher menu in E, the
+  minimise box in J). Chrome sizes scale with the slop instead — `ZD_BTN_SZ`,
+  `ZD_GRIP_SZ`, `ZD_TITLEBAR_H` in `app/src/wm/wm.h` — and a boot selftest asserts the
+  rectangles do not overlap on the target, because the value that breaks it lives in a
+  board fragment.
 - **The WM's `sys_dlist_t` is the truth for z-order**, not LVGL's child order. LVGL is a
   projection, re-applied by `zd_wm_restack()` using `lv_obj_move_to_index()`. Note
   `lv_obj_move_foreground()` exists only in LVGL's v8 compatibility shim

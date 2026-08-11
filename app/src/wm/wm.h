@@ -21,17 +21,50 @@
 
 #define ZD_TITLE_MAX 32
 
-/* Chrome geometry, in pixels. */
-#define ZD_FRAME_PAD   3  /**< frame edge to titlebar/content */
-#define ZD_TITLEBAR_H  18
-#define ZD_CLOSE_SZ    14
-#define ZD_CONTENT_GAP 2  /**< titlebar to content */
+/*
+ * Chrome geometry, in pixels.
+ *
+ * The controls grow by CONFIG_ZD_TOUCH_SLOP_PX rather than getting that much
+ * invisible hit area, and the titlebar grows with them. This is the launcher
+ * menu's lesson -- see the comment on ITEM_H in shell/launcher.c -- applied to
+ * the second place it bites: two titlebar buttons two pixels apart, each with
+ * 12 px of ext_click_area on a touch board, overlap completely, and LVGL awards
+ * an overlap to the last child. Every tap on minimise would have closed the
+ * window instead. Adjacent controls need to be bigger, not to claim more space
+ * than they occupy.
+ *
+ * Where the slop is 0 -- QEMU, and anything with a mouse -- these are the
+ * original numbers and the desktop looks exactly as it did.
+ */
+#define ZD_FRAME_PAD   3 /**< frame edge to titlebar/content */
+#define ZD_BTN_SZ      (14 + CONFIG_ZD_TOUCH_SLOP_PX) /**< a titlebar button */
+#define ZD_TITLEBAR_H  (ZD_BTN_SZ + 4)
+#define ZD_CONTENT_GAP 2 /**< titlebar to content */
+#define ZD_GRIP_SZ     (12 + CONFIG_ZD_TOUCH_SLOP_PX) /**< resize grip, bottom-right */
 
-#define ZD_WIN_MIN_W (ZD_FRAME_PAD * 2 + 60)
+/* Wide enough for both buttons plus something of a title. */
+#define ZD_WIN_MIN_W (ZD_FRAME_PAD * 2 + 2 * ZD_BTN_SZ + 40)
 #define ZD_WIN_MIN_H (ZD_FRAME_PAD * 2 + ZD_TITLEBAR_H + ZD_CONTENT_GAP + 20)
+
+/* The relationships a board fragment could break by raising the touch slop. */
+BUILD_ASSERT(ZD_TITLEBAR_H >= ZD_BTN_SZ, "the titlebar cannot hold its own buttons");
+BUILD_ASSERT(ZD_WIN_MIN_W - 2 * ZD_FRAME_PAD - 2 * ZD_BTN_SZ >= 20,
+	     "the smallest window has no room left for a title");
 
 struct zd_zapp_instance; /* milestone F */
 struct zd_wm;
+
+/**
+ * What a titlebar or grip press is currently doing.
+ *
+ * One shape of handler drives both -- press, pressing, release -- so the mode
+ * is what tells them apart, rather than two near-identical state machines.
+ */
+enum zd_drag_mode {
+	ZD_DRAG_NONE,
+	ZD_DRAG_MOVE,
+	ZD_DRAG_RESIZE,
+};
 
 /**
  * One managed window.
@@ -49,8 +82,10 @@ struct zd_client {
 	lv_obj_t *frame; /**< child of layers->windows */
 	lv_obj_t *titlebar;
 	lv_obj_t *title_label;
+	lv_obj_t *min_btn;
 	lv_obj_t *close_btn;
 	lv_obj_t *content; /**< the app's area */
+	lv_obj_t *grip;    /**< resize handle */
 
 	/* WM-authoritative geometry. LVGL follows this, never the reverse. */
 	lv_area_t geom;
@@ -59,13 +94,32 @@ struct zd_client {
 	bool focused;
 	bool pending_destroy;
 
+	/**
+	 * Unmapped, but still alive and still in wm->stack.
+	 *
+	 * The X11 distinction, and the reason minimise is nearly free here:
+	 * z-order survives it untouched, because the list never changed. Only
+	 * the projection does -- zd_wm_restack() hides the frame rather than
+	 * placing it. Anything walking the stack for a *visible* window has to
+	 * skip these; zd_wm_top() does.
+	 */
+	bool minimized;
+
+	/* Close handshake. The zapp has been asked and has not yet answered;
+	 * after the deadline the desktop stops asking. See
+	 * zd_wm_window_close_request().
+	 */
+	bool close_requested;
+	int64_t close_deadline;
+
 	struct zd_zapp_instance *owner; /**< NULL == desktop-internal window */
 	uintptr_t handle;              /**< the app's handle for this window, or 0 */
 
 	/* Drag state, valid only while dragging. */
 	lv_point_t drag_grab;   /**< pointer position at press */
 	lv_point_t drag_origin; /**< window position at press */
-	bool dragging;
+	lv_point_t drag_size;   /**< window size at press, for ZD_DRAG_RESIZE */
+	enum zd_drag_mode drag_mode;
 
 	struct zd_wm *wm;
 };
@@ -98,6 +152,29 @@ struct zd_wm {
 	 * its widgets in, so it never has to know the chrome's dimensions.
 	 */
 	void (*on_client_click)(struct zd_client *client, int16_t x, int16_t y);
+
+	/* Called when a client's content area finished changing size. Fired on
+	 * release rather than per pointer sample; see ZD_EV_RESIZED.
+	 */
+	void (*on_client_resized)(struct zd_client *client, int16_t w, int16_t h);
+
+	/* Called when a client was minimised or restored. */
+	void (*on_client_minimized)(struct zd_client *client, bool minimized);
+
+	/* Called when the user asks to close a window, so the owner can ask the
+	 * zapp first. Returning false means "nobody could answer, close it now".
+	 */
+	bool (*on_client_close_request)(struct zd_client *client);
+
+	/* Called whenever the set of windows, or anything the shell displays
+	 * about them, changed: created, closed, retitled, minimised, focused.
+	 *
+	 * Unlike the hooks above this one is about the whole desktop rather than
+	 * one client, and it is the first thing the WM tells the shell rather
+	 * than the loader. It MUST NOT rebuild anything inline -- see the note
+	 * on zd_tasklist_invalidate().
+	 */
+	void (*on_client_list_changed)(struct zd_wm *wm);
 };
 
 void zd_wm_init(struct zd_wm *wm, struct zd_layers *layers);
@@ -119,9 +196,38 @@ struct zd_client *zd_wm_window_create(struct zd_wm *wm, const char *title,
 /** Set the titlebar text. */
 void zd_wm_window_set_title(struct zd_client *client, const char *title);
 
-/** Move and/or resize. Width and height of 0 leave the current size alone. */
+/**
+ * @brief Move and/or resize.
+ *
+ * Width and height of 0 leave the current size alone; anything below the window
+ * minimum is raised to it. A size change fires on_client_resized().
+ */
 int zd_wm_window_set_geometry(struct zd_client *client, int16_t x, int16_t y, int16_t w,
 			      int16_t h);
+
+/**
+ * @brief Unmap a window without destroying it.
+ *
+ * It keeps its handle, its widgets and its place in the stack; it simply stops
+ * drawing and stops being clickable. Focus moves to whatever is now topmost.
+ */
+void zd_wm_window_minimize(struct zd_client *client);
+
+/** Map a minimised window again, raise it and focus it. */
+void zd_wm_window_restore(struct zd_client *client);
+
+/**
+ * @brief Ask for a window to be closed, on the user's behalf.
+ *
+ * This is what the close box and the taskbar go through, and it is the polite
+ * form of zd_wm_window_close(): the owning zapp gets a ZD_EV_WINDOW_CLOSE_REQUEST
+ * and a bounded grace period in which to flush and close itself.
+ *
+ * It is an ask, not a veto. A window with no owner, a second request for the
+ * same window, or a grace period that expires all close immediately. A zapp
+ * cannot make itself unclosable by ignoring the event.
+ */
+void zd_wm_window_close_request(struct zd_client *client);
 
 /**
  * @brief Mark a window for destruction.
@@ -133,8 +239,19 @@ int zd_wm_window_set_geometry(struct zd_client *client, int16_t x, int16_t y, in
  */
 void zd_wm_window_close(struct zd_client *client);
 
-/** Destroy everything queued by zd_wm_window_close(). Never call from dispatch. */
+/**
+ * @brief Destroy everything queued by zd_wm_window_close().
+ *
+ * Also sweeps expired close requests, so a zapp that ignores
+ * ZD_EV_WINDOW_CLOSE_REQUEST still loses its window. Never call from dispatch.
+ */
 void zd_wm_reap(struct zd_wm *wm);
+
+/** Fire on_client_list_changed(), if anything is listening. */
+void zd_wm_notify_list_changed(struct zd_wm *wm);
+
+/** Fire on_client_resized() with the content area's current size. */
+void zd_wm_notify_resized(struct zd_client *client);
 
 /* --- stacking (stack.c) --- */
 
@@ -144,7 +261,12 @@ void zd_wm_restack(struct zd_wm *wm);
 /** Move a client to the head of the stack and reproject. */
 void zd_wm_raise(struct zd_wm *wm, struct zd_client *client);
 
-/** Topmost client, or NULL if none. */
+/**
+ * @brief Topmost *mapped* client, or NULL if none.
+ *
+ * Minimised clients are skipped. They are still in wm->stack -- walk it
+ * directly if you want every client rather than every visible one.
+ */
 struct zd_client *zd_wm_top(struct zd_wm *wm);
 
 /* --- focus and dispatch (focus.c) --- */
@@ -160,7 +282,7 @@ void zd_wm_desktop_attach_events(struct zd_wm *wm);
 
 /* --- drag (drag.c) --- */
 
-/** Install titlebar drag handling. */
+/** Install titlebar drag-to-move and grip drag-to-resize handling. */
 void zd_wm_drag_attach(struct zd_client *client);
 
 /** Number of live clients. For leak assertions. */

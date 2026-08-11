@@ -24,4 +24,14 @@ void zd_taskbar_init(lv_obj_t *panel, zd_launcher_cb_t cb, void *cb_arg);
 /** Screen-space rectangle of the launcher button, for anchoring its menu. */
 void zd_taskbar_launcher_coords(lv_area_t *out);
 
+/**
+ * @brief The strip between the launcher button and the clock, in panel-local
+ *        coordinates, for the window list to fill.
+ *
+ * Exported rather than recomputed by the caller: the taskbar owns where its own
+ * furniture sits, and a second copy of that arithmetic would go stale the first
+ * time the clock changed width.
+ */
+void zd_taskbar_list_region(lv_area_t *out);
+
 #endif /* ZD_SHELL_TASKBAR_H_ */

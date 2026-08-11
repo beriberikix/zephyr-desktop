@@ -18,6 +18,31 @@ config ZD_MAX_CLIENTS
 	  point: a window leak shows up immediately as slab exhaustion instead of
 	  as slow heap growth nobody notices.
 
+config ZD_CLOSE_GRACE_MS
+	int "How long a zapp may take to answer a close request (ms)"
+	default 2000
+	help
+	  Clicking a window's close box sends its zapp a ZD_EV_WINDOW_CLOSE_REQUEST
+	  so it can flush and close itself. This is how long the desktop waits
+	  before doing it anyway.
+
+	  The bound is what makes the event safe to send at all. Without it a zapp
+	  that ignores the request -- or faults handling it -- owns a window the
+	  user can no longer get rid of, which is worse than never asking. Long
+	  enough for an fs_sync, not long enough to look broken.
+
+config ZD_TASKLIST_BTN_MAX_W
+	int "Widest a taskbar window button may be (px)"
+	default 96
+	help
+	  Buttons share the strip between the launcher and the clock, so with two
+	  windows open they would otherwise take half the screen each.
+
+	  There is deliberately no matching floor. On a 320 px panel four windows
+	  land near 48 px and the labels truncate, which is legible enough to click
+	  the right one; a row that refused to shrink would instead push windows
+	  off the end of the strip where they cannot be reached at all.
+
 config ZD_FS_ROOT
 	string "Mount point of the app filesystem"
 	default "/RAM:"

@@ -4,7 +4,7 @@ The contract is `include/zd/zapp_abi.h`. This document explains the parts of it
 that a header comment cannot: why it is shaped this way, and what it does *not*
 promise.
 
-Current version: **0.3**.
+Current version: **0.4**.
 
 ## Shape
 
@@ -152,7 +152,53 @@ the one genuinely dishonest thing this document could do.
 `zd_selftest_run()` asserts the refusals, the round trip, `-EBADF` on a closed
 handle, the kind and owner checks, the quota and the teardown at boot — fourteen
 checks, on every target, because the interesting failures are
-configuration-dependent.
+configuration-dependent. `zd_selftest_run_wm()` adds nineteen more once the
+window manager exists; together they are 51 checks in every image.
+
+## Window state
+
+Since 0.4 a window can be resized by its grip and minimised by its titlebar
+button or its taskbar entry, and the zapp is told about both.
+
+| event | when |
+|---|---|
+| `ZD_EV_RESIZED` | the content area settled at a new size |
+| `ZD_EV_MINIMIZED` / `ZD_EV_RESTORED` | the window was unmapped or mapped again |
+
+**Minimising is not closing.** A minimised window keeps its handle, its widgets
+and its place in the stacking order — it is unmapped, which means it draws
+nowhere and cannot be clicked. Restoring puts it back where it was in the order
+and raises it. `window_minimize()` and `window_restore()` let a zapp do to itself
+what the user can do to it.
+
+`ZD_EV_RESIZED` carries the **content area's** size, not the frame's. That is the
+rectangle a zapp lays widgets out in, and the only one it should ever have to
+reason about; the chrome's dimensions are the desktop's business and are not in
+the ABI at all. There is no call to ask for the size at creation time, so a zapp
+starts from a sensible default and refines on the first resize.
+
+**It arrives on release, not during the drag.** A zapp callback may open files,
+and on the CoreS3 the filesystem borrows the display's pin, so one filesystem-
+capable callback per pointer sample would stop the screen for the length of a
+drag. The content area tracks the pointer live; only the zapp's own widgets lag
+until the button comes up.
+
+### Closing is an ask, not a veto
+
+`ZD_EV_WINDOW_CLOSE_REQUEST` is delivered as of 0.4. Flush what you must and
+call `window_close()`.
+
+What a zapp **cannot** do is refuse. If it has not closed the window within
+`CONFIG_ZD_CLOSE_GRACE_MS` (2 s by default) the desktop closes it and logs a
+warning naming the window; a second click on the close box does the same
+immediately, which is the force-quit and needs no dialog. A window with no owner,
+or one whose zapp has no `event()` callback, closes at once rather than stalling
+for a grace period nobody was going to use.
+
+This asymmetry is deliberate. A zapp that could veto its own destruction — by
+ignoring the event, or by faulting while handling it — would own a window the
+user can no longer get rid of, which is worse than never asking. The grace
+period is long enough for an `fs_sync()` and not long enough to look broken.
 
 ## The exported symbol surface
 
@@ -186,9 +232,10 @@ Stated plainly so nobody mistakes the shim for more than it is:
 - **Blocking.** A zapp that loops forever in a callback hangs the desktop. A
   watchdog that can kill a zapp needs the zapp to own a thread —
   `ZD_ZAPP_FLAG_WANTS_THREAD` is defined and reserved, not honoured.
-- **Refusing a close.** `ZD_EV_WINDOW_CLOSE_REQUEST` is defined but never sent;
-  the WM closes unconditionally. With storage in the ABI this now matters: a
-  zapp holding unsaved state has no way to ask for a moment.
+- **Refusing a close.** A zapp is now *asked* (0.4), and can flush, but it
+  cannot say no — see "Closing is an ask, not a veto" above. There is also no
+  way for it to put a "save changes?" prompt on screen: that needs a dialog and
+  a keyboard, and it has neither.
 - **Storage quotas in bytes.** A zapp may fill the volume.
 
 ## Build

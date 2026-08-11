@@ -1,6 +1,8 @@
 # zephyr-desktop MVP — design doc + task list
 
-> **Status: MVP complete; storage added post-MVP (ABI 0.3, milestone I below).** Milestones A-G are done and verified on `qemu_cortex_a53`;
+> **Status: MVP complete; storage added post-MVP (ABI 0.3, milestone I), then window
+> management round 2 (ABI 0.4, milestone J) — resize, minimise, a taskbar window list and
+> the close handshake.** Milestones A-G are done and verified on `qemu_cortex_a53`;
 > milestone H builds and is documented, with the on-board run left for you (see
 > `docs/hardware.md`) since it needs the EVK in hand. Workspace pinned, target strategy proven end to end,
 > retro theme, taskbar, and a full stacking WM with drag, focus and deferred destruction
@@ -869,21 +871,86 @@ holds GPIO35 away from the display, so the screen cannot be drawn at all while i
 Bounding the call is the honest mitigation for staying single-threaded; making I/O
 asynchronous means thread-per-zapp, which is still reserved.
 
+### J — Window management, round 2 — **DONE (ABI 0.4)**
+
+Post-MVP. The WM is one of the two things `CLAUDE.md` calls load-bearing and was the
+one untouched since milestone D. A window could not be resized, could not be got out of
+the way without being destroyed, and once covered could only be reached by clicking a
+visible corner of it. `zd_wm_window_set_geometry()` logged *"resize is not implemented,
+moving only"*; `ZD_EV_WINDOW_CLOSE_REQUEST` was still an enum value nothing ever sent.
+
+36. ✅ A client can be **unmapped**. `client->minimized` keeps the client in `wm->stack`
+    and hides it in the projection, which is the X11 map/unmap distinction and the thing
+    `stack.c`'s header comment had been promising since milestone A. `zd_wm_top()` returns
+    the topmost *mapped* client; restore is exact rather than approximate, because nothing
+    ever left the ordering.
+37. ✅ **Resize**, by a grip in the bottom-right corner, through the same handler as
+    drag-to-move with `client->drag_mode` telling them apart. The sizing arithmetic came
+    out of `zd_client_build()` into one `layout_subtree()` that both build and
+    `apply_geom()` call, which is what makes resize three lines instead of a second copy
+    of the chrome layout.
+38. ✅ **A window list in the taskbar** (`shell/tasklist.c`), rebuilt wholesale from
+    `wm->stack` and driven by a new `wm->on_client_list_changed` hook. Without it a
+    minimised window is simply gone.
+39. ✅ **The close handshake.** The close box now goes through
+    `zd_wm_window_close_request()`: ask the zapp, give it `CONFIG_ZD_CLOSE_GRACE_MS`,
+    close it anyway when that expires or on a second click. The first thing the desktop
+    has ever asked a zapp to *do* rather than merely told it.
+40. ✅ ABI 0.4 — `ZD_EV_RESIZED`, `ZD_EV_MINIMIZED`, `ZD_EV_RESTORED`, a `resize` member
+    in the event union, and `window_minimize`/`window_restore`. Nineteen new boot
+    selftests (51 in the image). Verified on all three targets; `notes` handles all of it.
+
+**[J] Enum values are wire format.** The tidy place for `ZD_EV_RESIZED` is next to the
+other window events. Putting it there renumbers `ZD_EV_CLICK` and silently breaks every
+0.3 zapp — the vtable's append-only rule applies to the event enum too, and nothing in
+the versioning machinery would have caught it. New values go on the end, with a comment
+saying why they are not where you would look for them.
+
+**[J] `lv_obj_set_size()` does not resize anything.** It marks the object dirty; the
+coordinates are recomputed at the next layout pass. So the obvious implementation of the
+resize event — set the size, then read the content area's width back to put in the
+payload — hands the zapp *the size the window used to be*, while every other symptom of
+the resize looks correct. `zd_client_content_size()` derives it from `client->geom`
+instead, which is what "the model is the truth, LVGL is told" meant all along. Two boot
+selftests failed on this before it was understood, which is the only reason it was.
+
+**[J] Hit slop does not compose.** `lv_obj_set_ext_click_area()` is right for an isolated
+control and wrong for adjacent ones — LVGL awards an overlap to the last-added child, so
+the minimise and close buttons, 2 px apart with `CONFIG_ZD_TOUCH_SLOP_PX=12` on the
+CoreS3, would have sent *every* tap on minimise to the close box. This is the same bug
+that cost the launcher menu its top entry in milestone E, met a second time in a
+different disguise. The controls now grow with the slop as real pixels
+(`ZD_BTN_SZ`, `ZD_GRIP_SZ`, and `ZD_TITLEBAR_H` with them) and carry no ext area at all;
+where the slop is 0 the chrome is byte-identical to before. A boot check asserts the
+rectangles do not overlap, on the target, because the value that breaks it lives in a
+board fragment.
+
+**[J] The deferred-destroy rule has a second customer.** Clicking a taskbar button changes
+focus, which fires `on_client_list_changed`, which would `lv_obj_clean()` the row holding
+the button whose `LV_EVENT_CLICKED` dispatch is on the stack. Exactly the hazard
+`CLAUDE.md` describes for zapps closing their own windows, arrived at from the shell side
+by a route with no zapp in it. `zd_tasklist_invalidate()` sets a flag and
+`zd_tasklist_reap()` runs from the desktop loop, after `zd_wm_reap()` so it never rebuilds
+from a stack still holding windows that are about to go.
+
 ---
 
 ## 8. Explicitly deferred
 
 Named so they don't leak into the MVP: any catalog zapp (file browser, text editor, image
 viewer, media player, terminal, web server, web browser); hardware acceleration (PXP
-exists and is one Kconfig away — not now); MCU→MPU responsive layout morph; **window
-resize**, minimize, and a taskbar window list; IPC and desktop services (clipboard,
-notifications); multiple displays; hardware-enforced isolation (`USERSPACE` +
-`llext_add_domain` + memory domains); a theming engine (MVP hardcodes one palette); sound;
-real multi-user login; thread-per-zapp (`ZD_ZAPP_FLAG_WANTS_THREAD` is reserved, not
-honoured); out-of-tree zapp builds via the llext EDK; the fw_cfg zapp-delivery channel;
-keyboard input; `ZD_EV_WINDOW_CLOSE_REQUEST`; zapp icons; `native_sim`.
+exists and is one Kconfig away — not now); MCU→MPU responsive layout morph; **maximise**,
+window snapping, and resize from any edge but the bottom-right corner; IPC and desktop
+services (clipboard, notifications); multiple displays; hardware-enforced isolation
+(`USERSPACE` + `llext_add_domain` + memory domains); a theming engine (MVP hardcodes one
+palette); sound; real multi-user login; thread-per-zapp (`ZD_ZAPP_FLAG_WANTS_THREAD` is
+reserved, not honoured); out-of-tree zapp builds via the llext EDK; the fw_cfg
+zapp-delivery channel; keyboard input; a dialog a zapp could put on screen during a close
+request; zapp icons; `native_sim`.
 
 **Filesystem access from a zapp left this list in ABI 0.3** — see milestone I.
+**Window resize, minimise, the taskbar window list and `ZD_EV_WINDOW_CLOSE_REQUEST` left
+it in ABI 0.4** — see milestone J.
 
 ---
 

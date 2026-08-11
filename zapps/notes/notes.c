@@ -34,6 +34,12 @@
 #define MAX_LINES   6
 #define LINE_MAX    32
 
+/* Rough height of one line of the content area's font, in pixels. A zapp has no
+ * way to ask -- there is no text-metrics call in the ABI -- so it estimates and
+ * the worst case is one line too many, clipped by the window.
+ */
+#define LINE_PX 16
+
 /*
  * Per-instance state.
  *
@@ -53,6 +59,11 @@ struct notes_state {
 	 */
 	zd_window_t wins[MAX_TRIES];
 	zd_label_t bodies[MAX_TRIES];
+	/* How many lines each window has room for. Per window, because they can
+	 * now be resized independently -- one instance, several different views
+	 * of the same file.
+	 */
+	unsigned int rows[MAX_TRIES];
 	unsigned int count;
 	char path[ZD_PATH_MAX];
 	unsigned int lines;
@@ -200,8 +211,8 @@ static int load_tail(zd_zapp_ctx_t ctx, struct notes_state *st)
 
 /* --- display ------------------------------------------------------------------- */
 
-/* Keep only the last MAX_LINES lines, so the label cannot outgrow the window. */
-static const char *last_lines(const char *text)
+/* Keep only the last @p rows lines, so the label cannot outgrow the window. */
+static const char *last_lines(const char *text, unsigned int rows)
 {
 	const char *start = text;
 	unsigned int newlines = 0;
@@ -212,7 +223,7 @@ static const char *last_lines(const char *text)
 		}
 
 		newlines++;
-		if (newlines > MAX_LINES) {
+		if (newlines > rows) {
 			start = p;
 			break;
 		}
@@ -223,12 +234,27 @@ static const char *last_lines(const char *text)
 
 static void redraw(zd_zapp_ctx_t ctx, struct notes_state *st)
 {
-	const char *text = st->shown[0] != '\0' ? last_lines(st->shown)
-						: "(no notes yet -- click here)";
-
 	for (unsigned int i = 0; i < st->count; i++) {
+		const char *text = st->shown[0] != '\0'
+					   ? last_lines(st->shown, st->rows[i])
+					   : "(no notes yet -- click here)";
+
 		host->label_set_text(ctx, st->bodies[i], text);
 	}
+}
+
+/* Which of this instance's windows @p win is, or count if it is none of them. */
+static unsigned int index_of(struct notes_state *st, zd_window_t win)
+{
+	unsigned int i;
+
+	for (i = 0; i < st->count; i++) {
+		if (st->wins[i] == win) {
+			break;
+		}
+	}
+
+	return i;
 }
 
 /* --- lifecycle ------------------------------------------------------------------ */
@@ -277,6 +303,12 @@ static int notes_init(zd_zapp_ctx_t ctx, const struct zd_host_api *api)
 
 		st->wins[st->count] = win;
 		st->bodies[st->count] = api->label_create(ctx, win, "", 6, 8);
+		/* A guess until the first ZD_EV_RESIZED corrects it. There is no
+		 * call to ask how big a content area is at creation time, and
+		 * the zapp must not work it out from the frame -- the chrome's
+		 * dimensions are the desktop's business.
+		 */
+		st->rows[st->count] = MAX_LINES;
 		st->count++;
 	}
 
@@ -309,25 +341,89 @@ static int notes_init(zd_zapp_ctx_t ctx, const struct zd_host_api *api)
 	return 0;
 }
 
+/*
+ * The desktop is asking, not telling: flush and then say yes.
+ *
+ * There is nothing here to warn about -- each click is already synced to the
+ * card before the label is redrawn -- so the honest answer is to close at once
+ * rather than to sit on the grace period looking thoughtful. A zapp that did
+ * have unsaved state would write it here, and would still have to close: the
+ * desktop takes the window either way once CONFIG_ZD_CLOSE_GRACE_MS is up.
+ */
+static void on_close_request(zd_zapp_ctx_t ctx, struct notes_state *st, zd_window_t win)
+{
+	unsigned int i = index_of(st, win);
+
+	host->log(ctx, 0, "close requested; nothing unsaved");
+
+	/* Forget the window before asking for it to go. The close is deferred --
+	 * the reap does the deleting after this callback returns -- so a redraw
+	 * between now and then would be drawing into a window on its way out.
+	 */
+	if (i < st->count) {
+		st->wins[i] = st->wins[st->count - 1];
+		st->bodies[i] = st->bodies[st->count - 1];
+		st->rows[i] = st->rows[st->count - 1];
+		st->count--;
+	}
+
+	host->window_close(ctx, win);
+}
+
 static void notes_event(zd_zapp_ctx_t ctx, const struct zd_event *ev)
 {
 	struct notes_state *st = host->get_user_data(ctx);
 	char line[LINE_MAX];
-	bool ours = false;
+	unsigned int index;
 	uint32_t at;
 
-	if (st == NULL || ev->type != ZD_EV_CLICK) {
+	if (st == NULL) {
 		return;
 	}
 
 	/* A zapp is handed events for its own windows only, but an instance with
-	 * several must still tell them apart -- and here, treat them alike.
+	 * several must still tell them apart.
 	 */
-	for (unsigned int i = 0; i < st->count; i++) {
-		ours = ours || ev->win == st->wins[i];
+	index = index_of(st, ev->win);
+
+	switch (ev->type) {
+	case ZD_EV_WINDOW_CLOSE_REQUEST:
+		on_close_request(ctx, st, ev->win);
+		return;
+
+	case ZD_EV_RESIZED:
+		/* Show as much of the file as now fits. This is the visible
+		 * proof that the event arrives with the *content* area's size:
+		 * the zapp divides by a line height and nothing else.
+		 */
+		if (index < st->count) {
+			unsigned int rows = (unsigned int)ev->resize.h / LINE_PX;
+
+			st->rows[index] = rows > 0u ? rows : 1u;
+			redraw(ctx, st);
+		}
+		return;
+
+	case ZD_EV_MINIMIZED:
+		host->log(ctx, 0, "minimised; nothing to draw");
+		return;
+
+	case ZD_EV_RESTORED:
+		/* Back on screen, and the file may have moved on while this
+		 * window was away -- another instance shares it.
+		 */
+		(void)load_tail(ctx, st);
+		redraw(ctx, st);
+		return;
+
+	case ZD_EV_CLICK:
+		break;
+
+	default:
+		return;
 	}
 
-	if (!ours) {
+	if (index >= st->count) {
 		return;
 	}
 
