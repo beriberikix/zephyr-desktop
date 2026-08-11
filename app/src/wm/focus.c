@@ -20,6 +20,10 @@ LOG_MODULE_DECLARE(zd_main, CONFIG_ZD_LOG_LEVEL);
 static void apply_focus_look(struct zd_client *client)
 {
 	zd_titlebar_set_active(client->titlebar, client->focused);
+
+	if (client->wm->on_client_focus != NULL) {
+		client->wm->on_client_focus(client, client->focused);
+	}
 }
 
 void zd_wm_focus(struct zd_wm *wm, struct zd_client *client)

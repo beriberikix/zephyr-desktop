@@ -17,7 +17,9 @@
 #include "chrome/theme.h"
 #include "host/session.h"
 #include "host/storage.h"
+#include "loader/app_instance.h"
 #include "loader/app_loader.h"
+#include "loader/seed.h"
 #include "shell/desktop.h"
 #include "shell/launcher.h"
 #include "shell/taskbar.h"
@@ -29,37 +31,6 @@ static struct zd_layers layers;
 static struct zd_wm wm;
 static struct zd_session session;
 
-/*
- * Placeholder app binaries so discovery and the launcher have something real to
- * find before the loader exists. These are not valid ELF files and are never
- * loaded -- milestone F replaces them with a genuine hello.llext seeded from the
- * build. What is real here is the path: opendir, readdir, suffix match.
- */
-static void seed_placeholder_apps(void)
-{
-	static const char *const names[] = { "hello", "notes" };
-	char path[ZD_PATH_MAX];
-	struct fs_file_t file;
-
-	for (size_t i = 0; i < ARRAY_SIZE(names); i++) {
-		int ret = snprintf(path, sizeof(path), "%s/%s%s", ZD_PATH_SYSTEM_APPS,
-				   names[i], ZD_APP_SUFFIX);
-
-		if (ret < 0 || ret >= (int)sizeof(path)) {
-			continue;
-		}
-
-		fs_file_t_init(&file);
-		ret = fs_open(&file, path, FS_O_CREATE | FS_O_WRITE);
-		if (ret != 0) {
-			LOG_WRN("could not seed %s (%d)", path, ret);
-			continue;
-		}
-		fs_write(&file, "placeholder", 11);
-		fs_close(&file);
-	}
-}
-
 static void on_launcher_clicked(void *user_data)
 {
 	ARG_UNUSED(user_data);
@@ -68,13 +39,13 @@ static void on_launcher_clicked(void *user_data)
 
 static void on_app_chosen(const struct zd_app_entry *entry, void *user_data)
 {
-	struct zd_wm *wm_ = user_data;
+	ARG_UNUSED(user_data);
 
-	/* Milestone F replaces this with load -> bringup -> manifest -> init.
-	 * Opening a window named after the entry at least proves the path from
-	 * a file on disk to a window on screen is continuous.
+	/* A failed launch is an ordinary outcome, not a desktop failure: a bad
+	 * ELF, an ABI mismatch or a full instance table all end up here. The
+	 * loader has already logged why and unwound whatever it did.
 	 */
-	zd_wm_window_create(wm_, entry->name, NULL);
+	(void)zd_app_launch(entry);
 }
 
 int main(void)
@@ -98,7 +69,7 @@ int main(void)
 		return ret;
 	}
 	zd_storage_ensure_home(session.home);
-	seed_placeholder_apps();
+	zd_seed_install();
 
 	lvgl_lock();
 	zd_theme_init();
@@ -106,6 +77,9 @@ int main(void)
 	zd_taskbar_init(layers.panel, on_launcher_clicked, NULL);
 	zd_wm_init(&wm, &layers);
 	zd_wm_desktop_attach_events(&wm);
+	wm.on_client_destroyed = zd_app_on_client_destroyed;
+	wm.on_client_focus = zd_app_on_client_focus;
+	zd_app_loader_init(&wm, &session);
 	zd_launcher_init(&layers, &session, on_app_chosen, &wm);
 	lvgl_unlock();
 
@@ -119,7 +93,11 @@ int main(void)
 		 * event callback -- see CLAUDE.md.
 		 */
 		lvgl_lock();
+		/* Windows first, then instances: an app's LVGL objects must be
+		 * gone before the code that created them is unmapped.
+		 */
 		zd_wm_reap(&wm);
+		zd_app_reap();
 		uint32_t sleep_ms = lv_timer_handler();
 		lvgl_unlock();
 

@@ -60,6 +60,7 @@ struct zd_client {
 	bool pending_destroy;
 
 	struct zd_app_instance *owner; /**< NULL == desktop-internal window */
+	uintptr_t handle;              /**< the app's handle for this window, or 0 */
 
 	/* Drag state, valid only while dragging. */
 	lv_point_t drag_grab;   /**< pointer position at press */
@@ -80,12 +81,27 @@ struct zd_wm {
 	 * free code the return address points into must wait for this to hit 0.
 	 */
 	uint32_t in_app_callback;
+
+	/* Called from the reap once a client's widgets are gone, before its slab
+	 * block is released. A hook rather than a direct call into the loader:
+	 * the WM has no business knowing that apps exist.
+	 */
+	void (*on_client_destroyed)(struct zd_client *client);
+
+	/* Called when a client gains or loses focus, so the loader can turn it
+	 * into a ZD_EV_WINDOW_FOCUS / _BLUR for the owning app.
+	 */
+	void (*on_client_focus)(struct zd_client *client, bool focused);
 };
 
 void zd_wm_init(struct zd_wm *wm, struct zd_layers *layers);
 
 /**
  * @brief Create a managed window.
+ *
+ * The window is stacked on top but NOT focused: the caller must attach any
+ * ownership and handle first, then call zd_wm_focus(), or the owning app's
+ * focus event is dispatched before it has a handle and is dropped.
  *
  * @param geom desired outer rectangle; w/h are clamped to the window minimum,
  *             and a w or h of 0 means "pick a default".
@@ -96,6 +112,10 @@ struct zd_client *zd_wm_window_create(struct zd_wm *wm, const char *title,
 
 /** Set the titlebar text. */
 void zd_wm_window_set_title(struct zd_client *client, const char *title);
+
+/** Move and/or resize. Width and height of 0 leave the current size alone. */
+int zd_wm_window_set_geometry(struct zd_client *client, int16_t x, int16_t y, int16_t w,
+			      int16_t h);
 
 /**
  * @brief Mark a window for destruction.

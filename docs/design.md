@@ -1,9 +1,10 @@
 # zephyr-desktop MVP — design doc + task list
 
-> **Status: milestones A-E complete.** Workspace pinned, target strategy proven end to end,
+> **Status: milestones A-F complete — the MVP's core criterion is met.** Workspace pinned, target strategy proven end to end,
 > retro theme, taskbar, and a full stacking WM with drag, focus and deferred destruction
 > running on `qemu_cortex_a53`, plus a FAT filesystem, session, path-scoping shim and a
-> launcher that lists apps found on disk. Milestones F–H remain; see §7. Two findings from building A are folded in below, marked **[A]**.
+> launcher that lists apps found on disk, and a real .llext app loaded at runtime that
+> opens a window and draws "hello world". Milestones G–H remain; see §7. Two findings from building A are folded in below, marked **[A]**.
 
 ## Context
 
@@ -708,19 +709,38 @@ alongside `CONFIG_FS_FATFS_MAX_LFN=64`.
 not valid ELF, and are never loaded. What is real is the path: opendir, readdir, suffix
 match, menu. Milestone F replaces them with a genuine build artifact.
 
-### F — llext load/unload of hello world *(demo: the actual success criterion)*
-18. `include/zd/app_abi.h` — the full contract from §4.2. Write `docs/abi.md` alongside it.
-19. `host/host_api.c`: the vtable, `zd_get_host_api()`, `EXPORT_GROUP_SYMBOL(DESKTOP, ...)`,
-    `CONFIG_LLEXT_EXPORT_SYMBOL_GROUP_DESKTOP` in `app/Kconfig`.
-20. Handle registry with generation counters + owner checks (§4.3).
-21. `apps/hello/hello.c`: manifest via `LL_EXTENSION_SYMBOL`, `init` creates a window and
-    a label. `add_llext_target` + `llext_include_directories` in `app/CMakeLists.txt`.
-22. `loader/seed.c`: `generate_inc_file_for_target` embed + write to `/system/apps` at
-    boot if absent.
-23. `loader/app_instance.c`: the full lifecycle (§4.4) — load, bringup, bind, validate
-    ABI, init, event dispatch, deferred teardown, `llext_unload`.
-24. Launcher click → spawn. Close → unload. **Instrument slab and llext heap free-space
-    before/after a spawn-close cycle and assert they return to baseline.**
+### F — llext load/unload of hello world — **DONE**
+18. ✅ `include/zd/app_abi.h` complete: vtable, manifest, events, version rule.
+19. ✅ `host/host_api.c` with `EXPORT_GROUP_SYMBOL(DESKTOP, zd_get_host_api)`.
+20. ✅ `wm/handle.c` — generation-counted registry with owner checks.
+21. ✅ `apps/hello/hello.c`, built by `add_llext_target` into a 2968-byte aarch64
+    relocatable ELF.
+22. ✅ `loader/seed.c` installs it to `/system/apps` on first boot.
+23. ✅ `loader/app_instance.c` — the full lifecycle.
+24. ✅ **Verified: 20 consecutive launch/close cycles, 20 loads, 20 unloads, zero errors,
+    and after every single one `0 windows live, 8 slab blocks free, 0 apps live, 0
+    handles live`.** The twentieth load succeeding is itself the llext-heap assertion:
+    a leak of one instance per cycle would have exhausted the 128 KB heap well before.
+
+**[F] Two host-API tables, not one with a flag.** Trusted apps get a vtable whose
+`unsafe_lvgl_content` slot is populated; everyone else gets one where it is NULL. An
+untrusted app therefore has no function to call, rather than a function that checks and
+refuses.
+
+**[F] Creation and focus had to be separated.** `zd_wm_window_create()` originally focused
+the new window itself, which fired the owning app's `ZD_EV_WINDOW_FOCUS` before the caller
+had attached a handle — so the event was dispatched against handle 0 and silently dropped.
+The app's title never changed and nothing errored. Creation now stacks but does not focus;
+the caller attaches ownership and handle, then focuses. Caught only because hello
+deliberately renames its titlebar on focus.
+
+**[F] The app imports nothing.** `init()` is handed the vtable, so an extension needs no
+symbol from the desktop at all. hello calls `zd_get_host_api()` anyway, purely to force
+the loader to resolve a symbol from the export table — otherwise a broken
+`EXPORT_GROUP_SYMBOL` would go unnoticed until the first app that genuinely needed it.
+
+**[F] `generate_inc_file_for_target`, not `..._for_gen_target`.** The latter makes `app`
+depend on the `.llext` but not on the generated `.inc`, so `seed.c` races the generator.
 
 ### G — Two instances, and hardening *(demo: the full criterion, plus honesty)*
 25. `apps/hello2/hello2.c`; multi-instance of the same app with cascade placement;

@@ -32,6 +32,15 @@ config ZD_MAX_WINDOWS_PER_APP
 	int "Maximum windows a single app instance may own"
 	default 4
 
+config LLEXT_EXPORT_SYMBOL_GROUP_DESKTOP
+	bool "Export the zephyr-desktop host API to extensions"
+	default y
+	depends on LLEXT
+	help
+	  Gates EXPORT_GROUP_SYMBOL(DESKTOP, ...). Exactly one symbol lives in
+	  this group -- zd_get_host_api() -- because everything else an app can
+	  reach, it reaches through the returned vtable.
+
 module = ZD
 module-str = zephyr-desktop
 source "subsys/logging/Kconfig.template.log_config"
