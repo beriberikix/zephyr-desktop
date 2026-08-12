@@ -50,7 +50,9 @@ Prepare a FAT-formatted card:
 
 ```
 /system/zapps/hello.llext    <- copy build-rt1060/hello.llext
-/system/zapps/notes.llext    <- copy build-rt1060/notes.llext
+/system/zapps/notes.llext    <- and notes, notepad, files, mines the same way
+/system/zapps/badabi.llext   <- optional: it exists to be refused, so copying it
+                                proves the ABI gate works on this board too
 /system/share/
 /home/user/zapps/
 /tmp/
@@ -233,7 +235,9 @@ west build -p -b m5stack_cores3/esp32s3/procpu app -d build-cores3
 west flash -d build-cores3
 ```
 
-Builds clean at **513 KB flash**. Prepare a FAT-formatted microSD, or just
+Builds clean at **619 KB flash**, with `dram0_0_seg` the segment to watch --
+65.78% at ABI 0.7, and the one that has overflowed before. Prepare a
+FAT-formatted microSD, or just
 insert a blank FAT card: with the pin arbiter below the desktop writes its
 built-in zapps to `/SD:/system/zapps` on first boot, which is also how the write
 path gets exercised. Copy the **CoreS3** artifacts if you place them by hand --
@@ -242,7 +246,8 @@ ones are refused at relocation:
 
 ```
 /SD:/system/zapps/hello.llext   <- copy build-cores3/hello.llext
-/SD:/system/zapps/notes.llext   <- copy build-cores3/notes.llext
+/SD:/system/zapps/notes.llext   <- and notes, notepad, files, mines the same way
+/SD:/system/zapps/badabi.llext  <- optional: it exists to be refused
 /SD:/system/share/
 /SD:/home/user/zapps/
 /SD:/tmp/
