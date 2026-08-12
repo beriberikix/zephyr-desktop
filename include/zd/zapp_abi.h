@@ -906,6 +906,52 @@ struct zd_host_api {
 			     const char *initial, uint16_t id);
 	/** What a prompt produced. Empty after a cancel. -ENOSPC, never a truncation. */
 	int (*dialog_get_text)(zd_zapp_ctx_t ctx, char *buf, uint32_t len);
+
+	/* --- ABI 0.6: starting another zapp --------------------------------- */
+
+	/**
+	 * @brief Start another zapp, optionally handing it something to open.
+	 *
+	 * The second thing in this ABI that is a property of the desktop rather
+	 * than of your instance -- the clipboard was the first -- and the one
+	 * that makes double-clicking a document mean anything.
+	 *
+	 * @p name is a DISCOVERED ZAPP NAME, not a path: it resolves through the
+	 * same scan the Start menu uses, so this cannot be talked into loading
+	 * an arbitrary file. That is a real property of the design and not a
+	 * security boundary; see the note on permissions in docs/abi.md.
+	 *
+	 * @p arg is yours to define with whoever you are launching. There is no
+	 * association registry: a zapp that opens documents decides what it will
+	 * accept, and a zapp that launches one has to know. Notepad takes a
+	 * path.
+	 *
+	 * ASYNCHRONOUS, like the dialogs and for a sharper version of the same
+	 * reason: loading an extension reads a file and runs its init(), neither
+	 * of which may happen on a stack frame inside your event callback.
+	 * Everything checkable is checked before this returns; a corrupt image
+	 * or a refused ABI is logged, because there is no sensible way to tell
+	 * you and nothing you could do about it.
+	 *
+	 * If the target is a ZD_ZAPP_FLAG_SINGLETON that is already running, no
+	 * second instance is made: its frontmost window is raised and focused
+	 * and it is sent ZD_EV_LAUNCH_ARG.
+	 *
+	 * @return 0 once queued, -ENOENT if no such zapp was found, -ENOMEM if
+	 *         there is no instance slot free, -EBUSY if a launch is already
+	 *         queued, or -EINVAL.
+	 */
+	int (*zapp_launch)(zd_zapp_ctx_t ctx, const char *name, const char *arg);
+	/**
+	 * @brief What you were launched with, if anything.
+	 *
+	 * Valid from init() onwards, for the life of your instance, and replaced
+	 * by a ZD_EV_LAUNCH_ARG.
+	 *
+	 * @return its length, 0 if there was none, or -ENOSPC -- never a
+	 *         truncated path.
+	 */
+	int (*get_launch_arg)(zd_zapp_ctx_t ctx, char *buf, uint32_t len);
 };
 
 /* --- the zapp's side ------------------------------------------------------- */

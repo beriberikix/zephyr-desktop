@@ -37,6 +37,16 @@ struct zd_zapp_instance {
 	void *elf_buf;   /**< heap copy of the ELF, when loading via buffer */
 	size_t elf_size;
 
+	/**
+	 * What this instance was launched with, or "".
+	 *
+	 * Kept for the instance's life rather than only until init() returns: a
+	 * zapp may reasonably want it again -- to re-title a window, to retry a
+	 * failed open -- and 192 bytes is cheaper than making it copy the string
+	 * out defensively. Replaced when a singleton is re-launched.
+	 */
+	char launch_arg[ZD_PATH_MAX];
+
 	bool live;
 	bool initialising; /**< inside init(); no events may be delivered yet */
 	bool pending_unload;
@@ -52,7 +62,35 @@ void zd_zapp_loader_init(struct zd_wm *wm, struct zd_session *session);
  * discover -> load -> bringup -> bind manifest -> validate ABI -> init.
  * Any failure unwinds everything already done and returns non-zero.
  */
-int zd_zapp_launch(const struct zd_zapp_entry *entry);
+int zd_zapp_launch(const struct zd_zapp_entry *entry, const char *arg);
+
+/**
+ * @brief Ask for a zapp to be launched by name, from the desktop loop.
+ *
+ * What a zapp calls, and the difference from zd_zapp_launch() is when the work
+ * happens rather than what it does. Everything checkable is checked now and
+ * comes back as a return code; the load itself waits for zd_zapp_launch_reap().
+ *
+ * Deferred because the caller is usually another zapp, and doing it inline
+ * would (a) re-enter that zapp with a ZD_EV_WINDOW_BLUR while its own event()
+ * frame is on the stack, when the new window takes focus, and (b) read fifteen
+ * kilobytes off the filesystem from inside a zapp callback -- which on the
+ * CoreS3 means taking the display's pin back mid-dispatch.
+ *
+ * @param name a DISCOVERED ZAPP NAME, not a path. Resolved through the same
+ *             scan the Start menu uses, so this cannot be talked into loading
+ *             an arbitrary file.
+ * @param arg  what to hand the new instance, or NULL.
+ *
+ * @return 0 once queued, -ENOENT, -ENOMEM, -EBUSY or -EINVAL.
+ */
+int zd_zapp_launch_request(const char *name, const char *arg);
+
+/** Carry out a queued launch. From the desktop loop only. */
+void zd_zapp_launch_reap(void);
+
+/** Copy this instance's launch argument out. @return its length, or -ENOSPC. */
+int zd_zapp_get_launch_arg(struct zd_zapp_instance *inst, char *buf, uint32_t len);
 
 /**
  * @brief Mark an instance for teardown.

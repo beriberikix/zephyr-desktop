@@ -63,6 +63,28 @@ void zd_wm_raise(struct zd_wm *wm, struct zd_client *client)
 	zd_wm_restack(wm);
 }
 
+/*
+ * The frontmost window belonging to @p owner, or NULL.
+ *
+ * Walks the model rather than asking LVGL, like everything else that wants to
+ * know about z-order. Used to answer "you are already running": a singleton
+ * told to open something has to bring the window the user will type into to the
+ * front, and with several open that is the one they were last using -- which is
+ * exactly what frontmost means.
+ */
+struct zd_client *zd_wm_topmost_of(struct zd_wm *wm, const struct zd_zapp_instance *owner)
+{
+	struct zd_client *client;
+
+	SYS_DLIST_FOR_EACH_CONTAINER(&wm->stack, client, node) {
+		if (client->owner == owner && !client->pending_destroy) {
+			return client;
+		}
+	}
+
+	return NULL;
+}
+
 struct zd_client *zd_wm_top(struct zd_wm *wm)
 {
 	sys_dnode_t *node = sys_dlist_peek_head(&wm->stack);

@@ -143,7 +143,7 @@ void zd_smoke_tick(void)
 		smoke.refused = 0;
 
 		for (int i = 0; i < smoke.count; i++) {
-			if (zd_zapp_launch(&smoke.entries[i]) == 0) {
+			if (zd_zapp_launch(&smoke.entries[i], NULL) == 0) {
 				smoke.launched++;
 			} else {
 				/* badabi is installed precisely so that one

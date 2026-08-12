@@ -199,7 +199,87 @@ static void unwind_image(struct zd_zapp_instance *inst)
 	}
 }
 
-int zd_zapp_launch(const struct zd_zapp_entry *entry)
+/*
+ * Is this image already running, and does it want to be the only one?
+ *
+ * ZD_ZAPP_FLAG_SINGLETON was defined in 0.1 and enforced nowhere until now,
+ * which was harmless while the Start menu was the only way to launch anything
+ * -- a user who clicks a zapp twice has asked for it twice. A file browser that
+ * launches a zapp per double-click is what makes the flag mean something.
+ *
+ * Matched on the manifest pointer rather than the name, and that is not a
+ * shortcut: llext refcounts by name, so two instances of one zapp are looking
+ * at the same .data. Same manifest is the same image, exactly.
+ */
+static struct zd_zapp_instance *singleton_already_running(
+	const struct zd_zapp_manifest *manifest)
+{
+	if ((manifest->flags & ZD_ZAPP_FLAG_SINGLETON) == 0) {
+		return NULL;
+	}
+
+	for (size_t i = 0; i < MAX_INSTANCES; i++) {
+		struct zd_zapp_instance *other = &slots[i].inst;
+
+		if (other->live && !other->pending_unload && other->manifest == manifest) {
+			return other;
+		}
+	}
+
+	return NULL;
+}
+
+static void set_launch_arg(struct zd_zapp_instance *inst, const char *arg)
+{
+	if (arg == NULL) {
+		inst->launch_arg[0] = '\0';
+		return;
+	}
+
+	strncpy(inst->launch_arg, arg, sizeof(inst->launch_arg) - 1);
+	inst->launch_arg[sizeof(inst->launch_arg) - 1] = '\0';
+}
+
+int zd_zapp_get_launch_arg(struct zd_zapp_instance *inst, char *buf, uint32_t len)
+{
+	size_t need;
+
+	if (inst == NULL || buf == NULL || len == 0) {
+		return -EINVAL;
+	}
+
+	need = strlen(inst->launch_arg);
+	if (need + 1 > len) {
+		/* Never half a path: the caller would open the wrong thing, or
+		 * nothing, and could not tell which.
+		 */
+		return -ENOSPC;
+	}
+
+	memcpy(buf, inst->launch_arg, need + 1);
+	return (int)need;
+}
+
+/** Raise a running singleton's topmost window and tell it what was asked for. */
+static void relaunch(struct zd_zapp_instance *inst, const char *arg)
+{
+	struct zd_client *client;
+	struct zd_event ev = { .type = ZD_EV_LAUNCH_ARG };
+
+	set_launch_arg(inst, arg);
+
+	client = zd_wm_topmost_of(loader_wm, inst);
+	if (client != NULL) {
+		zd_wm_raise(loader_wm, client);
+		zd_wm_focus(loader_wm, client);
+		ev.win = (zd_window_t)client->handle;
+	}
+
+	LOG_INF("'%s' is already running; raising it", inst->name);
+	zd_zapp_dispatch(inst, &ev);
+}
+
+int zd_zapp_launch(const struct zd_zapp_entry *entry, const char *arg)
 {
 	struct instance_slot *slot;
 	struct zd_zapp_instance *inst;
@@ -274,9 +354,26 @@ int zd_zapp_launch(const struct zd_zapp_entry *entry)
 		return ret;
 	}
 
+	/* Checked here rather than before the load, because the flag lives in
+	 * the manifest and the manifest lives in the image. unwind_image() just
+	 * drops the refcount we took, which is the right thing: the resident
+	 * copy belongs to the instance already using it.
+	 */
+	{
+		struct zd_zapp_instance *running = singleton_already_running(manifest);
+
+		if (running != NULL) {
+			unwind_image(inst);
+			relaunch(running, arg);
+			return 0;
+		}
+	}
+
 	inst->manifest = manifest;
 	inst->live = true;
 	live_instances++;
+
+	set_launch_arg(inst, arg);
 
 	if (manifest->name != NULL) {
 		strncpy(inst->name, manifest->name, sizeof(inst->name) - 1);
@@ -317,6 +414,107 @@ int zd_zapp_launch(const struct zd_zapp_entry *entry)
 	}
 
 	return 0;
+}
+
+/* --- launching from a zapp ------------------------------------------------------- */
+
+/*
+ * One queued launch, drained from the desktop loop.
+ *
+ * One rather than a queue because the thing being asked for is a user action --
+ * somebody double-clicked a document -- and two of those cannot arrive in one
+ * frame. A second within the same frame gets -EBUSY, which is a truthful answer
+ * to "you already asked".
+ */
+static struct {
+	bool valid;
+	char name[ZD_ZAPP_NAME_MAX];
+	char arg[ZD_PATH_MAX];
+} pending_launch;
+
+/** Find a discovered zapp by name. @return true with @p out filled. */
+static bool find_zapp(const char *name, struct zd_zapp_entry *out)
+{
+	static struct zd_zapp_entry found[ZD_MAX_DISCOVERED];
+	int count = zd_zapps_discover(loader_session, found, ARRAY_SIZE(found));
+
+	for (int i = 0; i < count; i++) {
+		if (strcmp(found[i].name, name) == 0) {
+			*out = found[i];
+			return true;
+		}
+	}
+
+	return false;
+}
+
+int zd_zapp_launch_request(const char *name, const char *arg)
+{
+	struct zd_zapp_entry entry;
+
+	if (name == NULL || name[0] == '\0') {
+		return -EINVAL;
+	}
+
+	if (arg != NULL && strlen(arg) >= sizeof(pending_launch.arg)) {
+		return -EINVAL;
+	}
+
+	if (pending_launch.valid) {
+		return -EBUSY;
+	}
+
+	/* Everything answerable now is answered now, so a caller's mistake comes
+	 * back from the call that made it rather than arriving as a log line a
+	 * frame later. The picker does the same with its directory, and for the
+	 * same reason. What is left asynchronous is only what cannot be known
+	 * without doing the work: a corrupt ELF, a refused ABI, llext running
+	 * out of heap. Those are logged, exactly as they already are when the
+	 * Start menu hits them -- main.c has always discarded that return value.
+	 */
+	if (!find_zapp(name, &entry)) {
+		LOG_WRN("no zapp named '%s' was discovered", name);
+		return -ENOENT;
+	}
+
+	if (alloc_slot() == NULL) {
+		return -ENOMEM;
+	}
+
+	(void)strncpy(pending_launch.name, entry.name, sizeof(pending_launch.name) - 1);
+	pending_launch.name[sizeof(pending_launch.name) - 1] = '\0';
+
+	if (arg != NULL) {
+		strcpy(pending_launch.arg, arg);
+	} else {
+		pending_launch.arg[0] = '\0';
+	}
+
+	pending_launch.valid = true;
+	return 0;
+}
+
+void zd_zapp_launch_reap(void)
+{
+	struct zd_zapp_entry entry;
+
+	if (!pending_launch.valid || loader_wm == NULL ||
+	    loader_wm->in_zapp_callback > 0) {
+		return;
+	}
+
+	pending_launch.valid = false;
+
+	/* Re-resolved rather than remembered: discovery is cheap, and the path
+	 * recorded a frame ago could have been unlinked by whatever asked for
+	 * the launch -- a file browser is exactly the zapp that might.
+	 */
+	if (!find_zapp(pending_launch.name, &entry)) {
+		LOG_WRN("'%s' is gone since it was asked for", pending_launch.name);
+		return;
+	}
+
+	(void)zd_zapp_launch(&entry, pending_launch.arg);
 }
 
 void zd_zapp_dispatch(struct zd_zapp_instance *inst, const struct zd_event *ev)

@@ -357,6 +357,10 @@ void zd_wm_restack(struct zd_wm *wm);
 /** Move a client to the head of the stack and reproject. */
 void zd_wm_raise(struct zd_wm *wm, struct zd_client *client);
 
+/** The frontmost window owned by @p owner, or NULL. */
+struct zd_client *zd_wm_topmost_of(struct zd_wm *wm,
+				   const struct zd_zapp_instance *owner);
+
 /**
  * @brief Topmost *mapped* client, or NULL if none.
  *

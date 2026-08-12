@@ -755,6 +755,26 @@ static void *api_unsafe_lvgl_content(zd_zapp_ctx_t ctx, zd_window_t win)
 	return client != NULL ? client->content : NULL;
 }
 
+/* --- launching ---------------------------------------------------------------- */
+
+static int api_zapp_launch(zd_zapp_ctx_t ctx, const char *name, const char *arg)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	if (inst == NULL) {
+		return -EINVAL;
+	}
+
+	return zd_zapp_launch_request(name, arg);
+}
+
+static int api_get_launch_arg(zd_zapp_ctx_t ctx, char *buf, uint32_t len)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_zapp_get_launch_arg(inst, buf, len) : -EINVAL;
+}
+
 /* --- lists ------------------------------------------------------------------- */
 
 /*
@@ -896,7 +916,8 @@ static int api_list_get_item_text(zd_zapp_ctx_t ctx, zd_list_t list, int32_t ind
 	.list_get_item_id = api_list_get_item_id,                                           \
 	.list_get_item_text = api_list_get_item_text,                                       \
 	.label_set_pos = api_label_set_pos, .label_destroy = api_label_destroy,             \
-	.dialog_prompt = api_dialog_prompt, .dialog_get_text = api_dialog_get_text
+	.dialog_prompt = api_dialog_prompt, .dialog_get_text = api_dialog_get_text,         \
+	.zapp_launch = api_zapp_launch, .get_launch_arg = api_get_launch_arg
 
 static const struct zd_host_api host_api_untrusted = {
 	ZD_HOST_API_COMMON,

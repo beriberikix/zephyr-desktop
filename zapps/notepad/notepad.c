@@ -139,6 +139,26 @@ static int notepad_init(zd_zapp_ctx_t ctx, const struct zd_host_api *api)
 		return -1;
 	}
 
+	/*
+	 * Somebody may have launched us with a document. That is the whole
+	 * point of the file browser double-clicking a .txt, and it is the last
+	 * thing init() does because everything above has to exist first -- the
+	 * window to be retitled, the widget to be filled.
+	 *
+	 * A failure here is not a failure to start. An unreadable file leaves an
+	 * empty Untitled window, which is a better answer than refusing to open
+	 * at all and leaving the user with nothing to look at.
+	 */
+	{
+		char arg[ZD_PATH_MAX];
+
+		if (api->get_launch_arg(ctx, arg, sizeof(arg)) > 0) {
+			if (np_doc_open(ctx, st, arg) != 0) {
+				api->log(ctx, 0, "cannot open what I was launched with");
+			}
+		}
+	}
+
 	api->log(ctx, 0, "Notepad ready");
 	return 0;
 }

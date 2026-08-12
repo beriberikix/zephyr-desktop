@@ -55,7 +55,7 @@ static void on_app_chosen(const struct zd_zapp_entry *entry, void *user_data)
 	 * ELF, an ABI mismatch or a full instance table all end up here. The
 	 * loader has already logged why and unwound whatever it did.
 	 */
-	(void)zd_zapp_launch(entry);
+	(void)zd_zapp_launch(entry, NULL);
 }
 
 /* Diagnostics for the input path, which is otherwise silent when it fails. */
@@ -157,6 +157,11 @@ int main(void)
 		 */
 		zd_wm_reap(&wm);
 		zd_zapp_reap();
+		/* And then any launch a zapp asked for: after the teardown so a
+		 * freed slot is available, and before the shell reaps so the
+		 * taskbar sees the new window in the same iteration.
+		 */
+		zd_zapp_launch_reap();
 		/* And the taskbar last, so it rebuilds from a stack the reap has
 		 * already finished with rather than one still holding windows
 		 * that are about to disappear.

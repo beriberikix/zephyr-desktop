@@ -30,6 +30,7 @@
 #include "host/fs_shim.h"
 #include "host/storage.h"
 #include "host/text_api.h"
+#include "loader/zapp_instance.h"
 #include "wm/client.h"
 #include "wm/handle.h"
 #include "wm/wm.h"
@@ -630,6 +631,30 @@ static void test_list(struct zd_wm *wm)
 	check(zd_rowlist_items_used() == 0, "and every row is back in the pool");
 }
 
+/*
+ * What zapp_launch() refuses.
+ *
+ * Only the refusals: a successful request queues a real load, which would then
+ * happen at the first reap and put a window on a desktop that is still booting.
+ * The refusals are also the interesting half -- they are the whole reason the
+ * call validates synchronously instead of logging a frame later.
+ */
+static void test_launch_request(void)
+{
+	char toolong[ZD_PATH_MAX + 8];
+
+	memset(toolong, 'x', sizeof(toolong) - 1);
+	toolong[sizeof(toolong) - 1] = '\0';
+
+	check(zd_zapp_launch_request(NULL, NULL) == -EINVAL, "launching nothing is refused");
+	check(zd_zapp_launch_request("", NULL) == -EINVAL,
+	      "and so is launching the empty name");
+	check(zd_zapp_launch_request("no-such-zapp", NULL) == -ENOENT,
+	      "a name that was never discovered comes back as -ENOENT, at once");
+	check(zd_zapp_launch_request("notepad", toolong) == -EINVAL,
+	      "an argument too long to hold is refused rather than truncated");
+}
+
 static void test_text(struct zd_wm *wm)
 {
 	struct zd_zapp_instance *mine = (struct zd_zapp_instance *)0xa1;
@@ -853,6 +878,7 @@ void zd_selftest_run_wm(struct zd_wm *wm)
 	test_wm(wm);
 	test_rowlist(wm);
 	test_list(wm);
+	test_launch_request();
 	test_text(wm);
 	test_menu(wm);
 
