@@ -1,0 +1,71 @@
+# The first independent check this project has ever had.
+#
+# Everything it asserts has, until now, been asserted on one Mac with one SDK,
+# in a workspace that was created by hand and never recreated. Two things follow
+# from that and are the actual point of this file:
+#
+#   - `git clone && west init -l manifest && west update` is what the README
+#     tells a stranger to run, and nobody has ever run it. .west/ is gitignored
+#     and the working tree has been the workspace since day one. This job starts
+#     from nothing every time.
+#   - the checks themselves live in tools/ci-check.sh, not here, so that the
+#     machine which has to fix a failure can reproduce it with one command.
+#     Anything expressible only in YAML is glue, not a check.
+#
+# Unverified until it has run once on GitHub: this repository had no CI when the
+# file was written, so the step wiring below is careful rather than proven.
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out into a west topdir
+        uses: actions/checkout@v4
+        with:
+          path: zephyr-desktop
+          # Tags, so git describe can name the build. Without this the boot
+          # banner on a release build would say the commit rather than v0.1.0.
+          fetch-depth: 0
+
+      # manifest/ rather than the repo root: west.yml lives there so that the
+      # topdir can be the repo itself. See manifest/west.yml and CLAUDE.md.
+      - name: Set up west, the workspace and the Zephyr SDK
+        uses: zephyrproject-rtos/action-zephyr-setup@v1
+        with:
+          app-path: zephyr-desktop/manifest
+          toolchains: aarch64-zephyr-elf:arm-zephyr-eabi:xtensa-espressif_esp32s3_zephyr-elf
+          # Reads zephyr/SDK_VERSION, so the SDK cannot drift from the pin.
+          sdk-version: auto
+
+      - name: Report what we are actually building against
+        working-directory: zephyr-desktop
+        run: |
+          west --version
+          git describe --abbrev=12 --always --tags --dirty || true
+          echo "zephyr pinned at $(git -C ../zephyr rev-parse --short=12 HEAD)"
+          echo "sdk ${ZEPHYR_SDK_INSTALL_DIR:-<unset>} (want $(cat ../zephyr/SDK_VERSION))"
+
+      # Three boards built pristine, both QEMU images run, every .llext's
+      # imports checked, and the Kconfig warnings read per board. Exit status is
+      # the number of failed checks.
+      - name: Build every board and run every check
+        working-directory: zephyr-desktop
+        run: tools/ci-check.sh
+
+      - name: Keep the build logs, whatever happened
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs
+          path: zephyr-desktop/build-ci/*.log
+          if-no-files-found: warn
