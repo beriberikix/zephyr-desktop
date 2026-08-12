@@ -169,6 +169,29 @@ config ZD_SELFTEST
 	  handles. A shim that silently accepts everything looks exactly like one
 	  that works, so these run on the target rather than in a test directory.
 
+config ZD_SMOKE_TEST
+	bool "Launch and close every zapp at boot, then check for leaks"
+	help
+	  Drives the desktop from the loop rather than from a pointer: discover,
+	  launch everything, let it settle, ask every window to close, wait out
+	  the grace period, and compare the client, handle, open-file and
+	  instance counts against the values captured at boot.
+
+	  This is the only way the load/unload path can be exercised on a
+	  headless run, and the only automated check that a zapp still loads at
+	  all. Milestone J hand-tested a stale binary twice for want of it.
+
+	  Off by default: it takes over the desktop for a few seconds and closes
+	  every window it finds. Turn it on for a build you are measuring.
+
+config ZD_SMOKE_ROUNDS
+	int "Launch/close cycles the smoke test runs"
+	default 2
+	depends on ZD_SMOKE_TEST
+	help
+	  One round proves it works; the second proves it can be done again,
+	  which is the round that catches a resource freed to the wrong place.
+
 config ZD_SPI_DC_MISO_ARBITER
 	bool "Take the shared SPI MISO pin back from the display for storage"
 	depends on DISK_DRIVER_SDMMC && PINCTRL && LV_Z_LVGL_MUTEX

@@ -13,8 +13,9 @@
  * Note what is NOT included: no <string.h>, no <stdio.h>. The desktop exports
  * exactly one symbol to extensions (CONFIG_LLEXT_EXPORT_DEFAULT_GROUPS=n), so a
  * zapp has no libc at all -- strlen and snprintf would link here and fail at
- * load. Hence the handful of tiny helpers below. That is the cost of a one
- * symbol export surface, and it is worth paying.
+ * load. The replacements live in zapps/lib, which this zapp is linked against:
+ * a second translation unit, which the ARM targets could not have until they
+ * moved to LLEXT_TYPE_ELF_RELOCATABLE.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -23,6 +24,7 @@
 
 #include <zephyr/llext/symbol.h>
 
+#include <lib/zapplib.h>
 #include <zd/zapp_abi.h>
 
 #define MAX_TRIES 8
@@ -72,71 +74,6 @@ struct notes_state {
 
 static const struct zd_host_api *host;
 static struct notes_state states[4];
-
-/* --- the libc we do not have -------------------------------------------------- */
-
-/*
- * Zero a block. Through a volatile pointer on purpose: given a plain loop -- or
- * a compound literal assignment, which is how this started -- GCC recognises
- * the pattern and emits a call to memset, and memset is not one of the symbols
- * a zapp is allowed to import. The extension then fails to load, at runtime,
- * with an undefined-symbol error a long way from the assignment that caused it.
- */
-static void z_zero(void *dst, uint32_t len)
-{
-	volatile unsigned char *byte = dst;
-
-	while (len-- > 0u) {
-		*byte++ = 0u;
-	}
-}
-
-static uint32_t z_len(const char *s)
-{
-	const char *p = s;
-
-	while (*p != '\0') {
-		p++;
-	}
-
-	return (uint32_t)(p - s);
-}
-
-/** Append @p src to @p dst. @return the new length, or 0 if it would not fit. */
-static uint32_t z_append(char *dst, uint32_t at, uint32_t cap, const char *src)
-{
-	while (*src != '\0') {
-		if (at + 1 >= cap) {
-			return 0;
-		}
-		dst[at++] = *src++;
-	}
-
-	dst[at] = '\0';
-	return at;
-}
-
-/** Append @p value in decimal. @return the new length, or 0 if it would not fit. */
-static uint32_t z_append_u32(char *dst, uint32_t at, uint32_t cap, uint32_t value)
-{
-	char digits[10];
-	int n = 0;
-
-	do {
-		digits[n++] = (char)('0' + (value % 10u));
-		value /= 10u;
-	} while (value != 0u);
-
-	while (n > 0) {
-		if (at + 1 >= cap) {
-			return 0;
-		}
-		dst[at++] = digits[--n];
-	}
-
-	dst[at] = '\0';
-	return at;
-}
 
 /* --- storage ------------------------------------------------------------------ */
 

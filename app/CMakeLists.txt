@@ -36,6 +36,7 @@ target_sources(app PRIVATE
 
 target_sources_ifdef(CONFIG_ZD_SPI_DC_MISO_ARBITER app PRIVATE src/host/bus_arb.c)
 target_sources_ifdef(CONFIG_ZD_SELFTEST app PRIVATE src/selftest.c)
+target_sources_ifdef(CONFIG_ZD_SMOKE_TEST app PRIVATE src/smoke.c)
 target_sources_ifdef(CONFIG_ZD_TOUCH_PROBE app PRIVATE src/touch_probe.c)
 target_sources_ifdef(CONFIG_ZD_SEED_BUILTIN_ZAPPS app PRIVATE src/loader/seed.c)
 
@@ -47,24 +48,37 @@ target_sources_ifdef(CONFIG_ZD_SEED_BUILTIN_ZAPPS app PRIVATE src/loader/seed.c)
 #
 # They are built by this CMake project but are separate ELF artifacts from
 # zephyr.elf: one `west build` produces both the desktop image and hello.llext.
-# ARM/ARM64 default to LLEXT_TYPE_ELF_OBJECT, which permits exactly one source
-# file per extension -- fine for hello world, and lifted later by switching to
-# LLEXT_TYPE_ELF_RELOCATABLE.
+# A zapp may now be several source files. ARM and ARM64 default to
+# LLEXT_TYPE_ELF_OBJECT, which is a single compiler invocation and therefore
+# exactly one file; the board fragments for those targets select
+# LLEXT_TYPE_ELF_RELOCATABLE instead, and Xtensa already defaults to
+# LLEXT_TYPE_ELF_SHAREDLIB, which never had the restriction. add_llext_target
+# hard-errors on more than one source under ELF_OBJECT, so a board fragment
+# that forgets fails at CMake time rather than silently.
 #
 # The eventual move to genuinely out-of-tree app builds is
 # `west build -t llext-edk` plus an independent CMake project. Keeping the ABI
 # header outside app/ is what makes that a move rather than a rewrite.
 
-# Each app is one source file: ARM/ARM64 default to LLEXT_TYPE_ELF_OBJECT.
 set(ZD_ZAPP_NAMES hello notes badabi)
+
+# hello stays a single translation unit on purpose: it is the proof that the
+# simplest possible zapp is still the simplest possible zapp, and it is the only
+# thing that would notice if ELF_OBJECT came back. Everything else links
+# zapps/lib, so the no-libc helpers exist once rather than once per zapp.
+set(ZD_hello_SOURCES  ${ZD_ZAPPS}/hello/hello.c)
+set(ZD_notes_SOURCES  ${ZD_ZAPPS}/notes/notes.c ${ZD_ZAPPS}/lib/zapplib.c)
+set(ZD_badabi_SOURCES ${ZD_ZAPPS}/badabi/badabi.c)
 
 foreach(zd_app ${ZD_ZAPP_NAMES})
   set(ZD_${zd_app}_LLEXT ${PROJECT_BINARY_DIR}/${zd_app}.llext)
   add_llext_target(zd_zapp_${zd_app}
     OUTPUT  ${ZD_${zd_app}_LLEXT}
-    SOURCES ${ZD_ZAPPS}/${zd_app}/${zd_app}.c
+    SOURCES ${ZD_${zd_app}_SOURCES}
   )
-  llext_include_directories(zd_zapp_${zd_app} ${ZD_INCLUDE})
+  # ZD_INCLUDE for <zd/zapp_abi.h>; ZD_ZAPPS for <lib/zapplib.h>, spelled with
+  # the directory so it can never be mistaken for a system header.
+  llext_include_directories(zd_zapp_${zd_app} ${ZD_INCLUDE} ${ZD_ZAPPS})
 
   # WORKAROUND (Zephyr main @ e201b84b): add_llext_target's packaging step does
   # not re-run when a source file changes. Its chain is
@@ -78,7 +92,8 @@ foreach(zd_app ${ZD_ZAPP_NAMES})
   # Re-attach the missing file dependency to the documented pkg_input property.
   get_target_property(zd_pkg_input zd_zapp_${zd_app} pkg_input)
   add_custom_command(OUTPUT ${zd_pkg_input} APPEND
-    DEPENDS ${ZD_ZAPPS}/${zd_app}/${zd_app}.c ${ZD_INCLUDE}/zd/zapp_abi.h
+    DEPENDS ${ZD_${zd_app}_SOURCES} ${ZD_INCLUDE}/zd/zapp_abi.h
+            ${ZD_ZAPPS}/lib/zapplib.h
   )
 
   generate_inc_file_for_target(app

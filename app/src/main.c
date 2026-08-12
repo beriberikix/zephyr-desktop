@@ -25,6 +25,7 @@
 #include "shell/taskbar.h"
 #include "shell/tasklist.h"
 #include "selftest.h"
+#include "smoke.h"
 #include "wm/wm.h"
 
 LOG_MODULE_REGISTER(zd_main, CONFIG_ZD_LOG_LEVEL);
@@ -116,6 +117,7 @@ int main(void)
 	zd_zapp_loader_init(&wm, &session);
 	zd_launcher_init(&layers, &session, on_app_chosen, &wm);
 	zd_selftest_run_wm(&wm);
+	zd_smoke_init(&wm, &session);
 	lvgl_unlock();
 
 	display_blanking_off(display);
@@ -144,6 +146,13 @@ int main(void)
 		 * that are about to disappear.
 		 */
 		zd_tasklist_reap();
+
+		/* After the reaps, for the same reason the taskbar rebuild is:
+		 * it launches and closes windows, which must never happen from
+		 * inside LVGL dispatch. Compiles to nothing unless
+		 * CONFIG_ZD_SMOKE_TEST is set.
+		 */
+		zd_smoke_tick();
 
 		uint32_t sleep_ms = lv_timer_handler();
 		lvgl_unlock();
