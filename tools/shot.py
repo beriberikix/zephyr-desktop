@@ -28,7 +28,8 @@ import sys
 import time
 import zlib
 
-QEMU = os.path.expanduser("~/zephyr-sdk-1.0.1/hosttools/usr/bin/qemu-system-aarch64")
+SDK = os.environ.get("ZEPHYR_SDK_INSTALL_DIR", os.path.expanduser("~/zephyr-sdk-1.0.1"))
+QEMU = os.environ.get("QEMU", f"{SDK}/hosttools/usr/bin/qemu-system-aarch64")
 ABS_MAX = 32767  # virtio-tablet reports absolute axes over this range
 
 

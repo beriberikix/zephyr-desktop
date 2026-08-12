@@ -10,7 +10,7 @@
 # this project a milestone:
 #
 #   - it reads the build output UNFILTERED and fails on Kconfig's "was assigned
-#     the value ... but got (undefined)". A knob that does not exist on a target
+#     the value ... but got the value ''". A knob that does not exist on a target
 #     is a knob that silently does nothing, and the build says so every time.
 #     CONFIG_LLEXT_HEAP_SIZE does not exist on the Harvard ESP32-S3, and raising
 #     it for ARM did nothing there for a whole milestone while Kconfig said so
@@ -48,10 +48,30 @@ want=${ZD_CI_BOARDS:-all}
 out=${ZD_CI_OUT:-$root/build-ci}
 mkdir -p "$out" || exit 250
 
+# Only if it is actually there. Zephyr finds the SDK through its own CMake
+# package registry and does not need this; a guess at $HOME/zephyr-sdk-<version>
+# is a convenience on a developer's machine and a wrong answer on a CI runner,
+# where the SDK is unpacked wherever the setup action cached it.
 if [ -z "${ZEPHYR_SDK_INSTALL_DIR:-}" ]; then
 	sdk_version=$(cat zephyr/SDK_VERSION 2>/dev/null)
-	export ZEPHYR_SDK_INSTALL_DIR="$HOME/zephyr-sdk-${sdk_version:-1.0.1}"
+	guess="$HOME/zephyr-sdk-${sdk_version:-1.0.1}"
+	[ -d "$guess" ] && export ZEPHYR_SDK_INSTALL_DIR="$guess"
 fi
+
+# ---------------------------------------------------------------------------
+# Ask the build where its tools are, rather than guessing.
+#
+# Every host tool this script needs is already recorded in the build's own
+# CMakeCache.txt, by the CMake run that produced the artifacts being checked --
+# so nm is the nm that emitted the symbols, and qemu is the one `west build -t
+# run` would use. Hardcoding $ZEPHYR_SDK_INSTALL_DIR/<triple>/bin/<triple>-nm
+# was wrong twice over: the SDK also ships a gnu/<triple>/bin copy and that is
+# the one CMake picks, and on a CI runner the variable is not even set.
+# ---------------------------------------------------------------------------
+cache_get() {
+	local dir=$1 key=$2
+	sed -n "s|^${key}:[A-Z]*=||p" "$dir/CMakeCache.txt" 2>/dev/null | head -1
+}
 
 failed=0
 declare -a report
@@ -129,16 +149,17 @@ build_board() {
 # target still fails.
 # ---------------------------------------------------------------------------
 check_llexts() {
-	local dir=$1 nm=$2 dynamic=$3 tolerate=${4:-}
+	local dir=$1 dynamic=$2 tolerate=${3:-}
 	local flags=(-u)
 	local bad=0 count=0
-	local name
+	local name nm
 	name=$(basename "$dir")
+	nm=$(cache_get "$dir" CMAKE_NM)
 
 	[ "$dynamic" = 1 ] && flags=(-D -u)
 
-	if [ ! -x "$nm" ]; then
-		check_fail "$name: no nm at $nm"
+	if [ -z "$nm" ] || [ ! -x "$nm" ]; then
+		check_fail "$name: the build did not record a usable CMAKE_NM (got '${nm:-nothing}')"
 		return
 	fi
 
@@ -170,9 +191,27 @@ check_llexts() {
 run_qemu() {
 	local desc=$1 dir=$2
 	shift 2
+	local qemu
+	qemu=$(cache_get "$dir" QEMU)
+
+	# The SDK's own qemu is the right one -- it is what `west build -t run`
+	# uses, so a run here is the run a human would get. But an SDK installed
+	# without hosttools records QEMU-NOTFOUND, and a distribution
+	# qemu-system-aarch64 is a fine second choice: everything this project
+	# needs from it (virtio-mmio, ramfb, virtio-tablet, QMP) is upstream and
+	# has been for years.
+	if [ -z "$qemu" ] || [ ! -x "$qemu" ]; then
+		qemu=$(command -v qemu-system-aarch64)
+	fi
 
 	section "run $desc"
-	if python3 tools/qemu-drive.py -d "$dir" "$@"; then
+	if [ -z "$qemu" ] || [ ! -x "$qemu" ]; then
+		check_fail "$desc: no usable qemu -- neither the build's QEMU nor one on PATH"
+		return
+	fi
+	printf '  qemu: %s\n' "$qemu"
+
+	if QEMU=$qemu python3 tools/qemu-drive.py -d "$dir" "$@"; then
 		check_ok "$desc"
 	else
 		check_fail "$desc"
@@ -181,20 +220,15 @@ run_qemu() {
 
 # ---------------------------------------------------------------------------
 
-sdk=$ZEPHYR_SDK_INSTALL_DIR
-nm_a64="$sdk/aarch64-zephyr-elf/bin/aarch64-zephyr-elf-nm"
-nm_arm="$sdk/arm-zephyr-eabi/bin/arm-zephyr-eabi-nm"
-nm_xt="$sdk/xtensa-espressif_esp32s3_zephyr-elf/bin/xtensa-espressif_esp32s3_zephyr-elf-nm"
-
 printf 'zephyr-desktop ci-check\n'
 printf '  tree     %s\n' "$(git describe --abbrev=12 --always --dirty 2>/dev/null || echo 'not a git tree')"
-printf '  sdk      %s\n' "$sdk"
+printf '  sdk      %s\n' "${ZEPHYR_SDK_INSTALL_DIR:-<unset; CMake will find it>}"
 printf '  pristine %s\n' "$pristine"
 printf '  boards   %s\n' "$want"
 
 if [ "$want" = all ] || [ "$want" = qemu ]; then
 	if build_board qemu_cortex_a53 "$out/qemu"; then
-		check_llexts "$out/qemu" "$nm_a64" 0
+		check_llexts "$out/qemu" 0
 
 		# The boot checks. 224 of them at ABI 0.7, and the count is not
 		# asserted here on purpose -- adding a check should not break CI,
@@ -222,13 +256,13 @@ if [ "$want" = all ] || [ "$want" = cores3 ]; then
 	# Xtensa's spurious memset is pre-existing and does not stop the board
 	# loading zapps. Named, so that anything else still fails.
 	if build_board m5stack_cores3/esp32s3/procpu "$out/cores3"; then
-		check_llexts "$out/cores3" "$nm_xt" 1 memset
+		check_llexts "$out/cores3" 1 memset
 	fi
 fi
 
 if [ "$want" = all ] || [ "$want" = rt1060 ]; then
 	if build_board mimxrt1060_evk/mimxrt1062/qspi "$out/rt1060"; then
-		check_llexts "$out/rt1060" "$nm_arm" 0
+		check_llexts "$out/rt1060" 0
 	fi
 fi
 
