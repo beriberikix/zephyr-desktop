@@ -34,6 +34,10 @@ static const uint8_t notepad_llext[] = {
 #include <notepad_llext.inc>
 };
 
+static const uint8_t files_llext[] = {
+#include <files_llext.inc>
+};
+
 struct builtin {
 	const char *name;
 	const uint8_t *data;
@@ -44,6 +48,7 @@ static const struct builtin builtins[] = {
 	{ .name = "hello", .data = hello_llext, .size = sizeof(hello_llext) },
 	{ .name = "notes", .data = notes_llext, .size = sizeof(notes_llext) },
 	{ .name = "notepad", .data = notepad_llext, .size = sizeof(notepad_llext) },
+	{ .name = "files", .data = files_llext, .size = sizeof(files_llext) },
 	/* Installed on purpose: the ABI version gate is only proven by a zapp
 	 * that has to be refused. See zapps/badabi.
 	 */

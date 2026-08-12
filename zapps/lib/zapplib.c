@@ -157,6 +157,29 @@ const char *z_basename(const char *path)
 	return last;
 }
 
+bool z_parent(char *path)
+{
+	uint32_t last = 0;
+	uint32_t i;
+
+	for (i = 0; path[i] != '\0'; i++) {
+		if (path[i] == '/') {
+			last = i;
+		}
+	}
+
+	/* Nothing above the first separator: "/RAM:" has no parent this side of
+	 * the ABI, and neither does a path with no separator at all. Refusing is
+	 * better than producing "" and letting the caller open the volume root.
+	 */
+	if (last == 0) {
+		return false;
+	}
+
+	path[last] = '\0';
+	return true;
+}
+
 bool z_path_join(char *out, uint32_t cap, const char *dir, const char *name)
 {
 	uint32_t at;

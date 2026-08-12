@@ -86,6 +86,17 @@ uint32_t z_append_pad(char *dst, uint32_t at, uint32_t cap, uint32_t value,
 const char *z_basename(const char *path);
 
 /**
+ * @brief Truncate @p path at its last separator, in place.
+ *
+ * How a zapp goes up a directory. It cannot append ".." instead: the desktop's
+ * shim rejects that as a component on purpose, so that the shim and the
+ * filesystem can never disagree about what a path means.
+ *
+ * @return false, leaving @p path alone, if there is nothing above it.
+ */
+bool z_parent(char *path);
+
+/**
  * @brief Build "<dir>/<name>" in @p out.
  *
  * @return false if the result would not fit, in which case @p out holds an
