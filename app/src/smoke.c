@@ -20,6 +20,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <errno.h>
+
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
@@ -143,15 +145,36 @@ void zd_smoke_tick(void)
 		smoke.refused = 0;
 
 		for (int i = 0; i < smoke.count; i++) {
-			if (zd_zapp_launch(&smoke.entries[i], NULL) == 0) {
+			int ret = zd_zapp_launch(&smoke.entries[i], NULL);
+
+			if (ret == 0) {
 				smoke.launched++;
-			} else {
+			} else if (ret == -ENOTSUP) {
 				/* badabi is installed precisely so that one
 				 * entry here is always refused. A round where
 				 * nothing was refused means the version gate
 				 * stopped working.
 				 */
 				smoke.refused++;
+			} else {
+				/*
+				 * COUNTING REFUSALS IS NOT ENOUGH, and this
+				 * branch is here because milestone M proved it.
+				 *
+				 * badabi is last in the seed order, so when the
+				 * llext heap ran out with the sixth zapp it was
+				 * badabi that failed to load -- with -ENOMEM,
+				 * not with the ABI refusal it exists to
+				 * demonstrate. The count was still 1, the
+				 * summary still said PASS, and the version gate
+				 * had not been exercised at all. Milestone K
+				 * predicted this failure in writing and it
+				 * happened anyway, because nothing checked.
+				 */
+				LOG_ERR("SMOKE: '%s' failed with %d, which is not the "
+					"ABI gate refusing it -- see LLEXT_HEAP_SIZE",
+					smoke.entries[i].name, ret);
+				smoke.failures++;
 			}
 		}
 

@@ -22,11 +22,14 @@
 #include <zd/zapp_abi.h>
 
 #include "selftest.h"
+#include "chrome/cellgrid.h"
 #include "chrome/menu.h"
 #include "chrome/rowlist.h"
 #include "host/clipboard.h"
 #include "host/fs_api.h"
+#include "host/grid_api.h"
 #include "host/list_api.h"
+#include "host/timer_api.h"
 #include "host/fs_shim.h"
 #include "host/storage.h"
 #include "host/text_api.h"
@@ -648,6 +651,254 @@ static void test_list(struct zd_wm *wm)
 }
 
 /*
+ * The cell grid, through its own interface.
+ *
+ * Two things here are worth the lines. The first is the same point every list
+ * check makes: the model answers at once and the picture lags, so nothing below
+ * ever paints. The second is new, and it is the arithmetic -- a grid's hit test
+ * is a division, its size is a multiplication, and BOTH are scaled by
+ * CONFIG_ZD_TOUCH_SLOP_PX, which lives in a board fragment. A cell size that
+ * disagrees with the hit test by one pixel puts every tap near an edge on the
+ * neighbouring square, which is unplayable and looks like bad luck.
+ *
+ * So the border is not hardcoded here: it is derived from what measure() says a
+ * 1x1 grid is, and the hit test is then checked against that. The two have to
+ * agree with each other rather than with a number written twice.
+ */
+static void test_cellgrid(struct zd_wm *wm)
+{
+	lv_area_t want = { .x1 = 4, .y1 = 4, .x2 = 4 + 240 - 1, .y2 = 4 + 200 - 1 };
+	uint32_t cells_before = zd_cellgrid_cells_used();
+	uint32_t grids_before = zd_cellgrid_live_count();
+	int16_t cell = zd_cellgrid_cell_size();
+	struct zd_client *client;
+	struct zd_cellgrid *g;
+	uint8_t col;
+	uint8_t row;
+	int16_t border;
+	int16_t w;
+	int16_t h;
+
+	client = zd_wm_window_create(wm, "selftest grid", &want);
+	if (client == NULL) {
+		check(false, "a window for the grid checks could be created");
+		return;
+	}
+
+	zd_cellgrid_measure(1, 1, &w, &h);
+	border = (int16_t)((w - cell) / 2);
+	check(w == h && w == cell + 2 * border, "a one-cell grid is square");
+
+	zd_cellgrid_measure(4, 3, &w, &h);
+	check(w == 4 * cell + 2 * border && h == 3 * cell + 2 * border,
+	      "and a bigger one is cells plus one border, not one border per cell");
+
+	zd_cellgrid_fit(w, h, &col, &row);
+	check(col == 4 && row == 3, "fit inverts measure exactly");
+
+	zd_cellgrid_fit((int16_t)(w - 1), (int16_t)(h - 1), &col, &row);
+	check(col == 3 && row == 2, "a pixel short of a cell is a cell short");
+
+	zd_cellgrid_fit(2, 2, &col, &row);
+	check(col == 0 && row == 0, "a box too small for one cell fits none");
+
+	g = zd_cellgrid_create(client->content, 0, 0, 5, 4);
+	check(g != NULL, "a grid can be created");
+	if (g == NULL) {
+		zd_wm_window_close(client);
+		zd_wm_reap(wm);
+		return;
+	}
+
+	check(zd_cellgrid_cols(g) == 5 && zd_cellgrid_rows(g) == 4,
+	      "and remembers its shape");
+	check(zd_cellgrid_capacity() == CONFIG_ZD_GRID_MAX_CELLS,
+	      "capacity is reported, so nobody has to read the Kconfig");
+	check(zd_cellgrid_cells_used() == cells_before + 20,
+	      "and it took exactly cols*rows cells from the shared pool");
+
+	check(zd_cellgrid_style(g, 0, 0) == ZD_CELL_RAISED,
+	      "every cell starts raised, which is what an unpressed button is");
+
+	check(zd_cellgrid_set(g, 2, 1, "7", ZD_CELL_SUNKEN, 0x0000FF) == 0,
+	      "a cell can be set");
+	check(zd_cellgrid_style(g, 2, 1) == ZD_CELL_SUNKEN,
+	      "and answers from the model at once, with no repaint in between");
+	check(zd_cellgrid_style(g, 2, 2) == ZD_CELL_RAISED, "leaving its neighbour alone");
+
+	check(zd_cellgrid_set(g, 5, 0, "x", ZD_CELL_RAISED, 0) == -EINVAL,
+	      "a cell past the last column is refused");
+	check(zd_cellgrid_set(g, 0, 4, "x", ZD_CELL_RAISED, 0) == -EINVAL,
+	      "and past the last row");
+	check(zd_cellgrid_set(g, 0, 0, "x", ZD_CELL_FLAT + 1, 0) == -EINVAL,
+	      "and a style that is not one of the three");
+
+	check(zd_cellgrid_clear(g) == 0 && zd_cellgrid_style(g, 2, 1) == ZD_CELL_RAISED,
+	      "clearing puts every cell back, immediately");
+
+	/* The hit test, against the border measure() just implied. */
+	check(zd_cellgrid_hit(g, border, border, &col, &row) && col == 0 && row == 0,
+	      "the top-left pixel inside the border is cell 0,0");
+	check(zd_cellgrid_hit(g, (int16_t)(border + cell - 1), border, &col, &row) &&
+		      col == 0,
+	      "and the last pixel of that cell is still cell 0");
+	check(zd_cellgrid_hit(g, (int16_t)(border + cell), border, &col, &row) && col == 1,
+	      "and the next one over is cell 1");
+	check(zd_cellgrid_hit(g, (int16_t)(border + 4 * cell + cell / 2),
+			      (int16_t)(border + 3 * cell + cell / 2), &col, &row) &&
+		      col == 4 && row == 3,
+	      "the bottom-right cell is where the arithmetic says");
+	check(!zd_cellgrid_hit(g, (int16_t)(border - 1), border, &col, &row),
+	      "the border itself is not a cell");
+	check(!zd_cellgrid_hit(g, (int16_t)(border + 5 * cell), border, &col, &row),
+	      "and neither is one column past the end");
+
+	/* Reshaping releases the old block first, so the same space comes back
+	 * -- which is the only reason a grid can grow at all once the pool has
+	 * anything else in it.
+	 */
+	check(zd_cellgrid_resize(g, 6, 6) == 0, "a grid can be reshaped");
+	check(zd_cellgrid_cols(g) == 6 && zd_cellgrid_rows(g) == 6, "to the new shape");
+	check(zd_cellgrid_cells_used() == cells_before + 36, "taking what it now needs");
+	/* 255x255 rather than cap+1: the dimensions are bytes, so "one more
+	 * than the cap" is not expressible and the honest test is a shape that
+	 * is over it by any reckoning.
+	 */
+	check(zd_cellgrid_resize(g, 255, 255) == -EINVAL,
+	      "and refuses to grow past the per-grid cap");
+	check(zd_cellgrid_cols(g) == 6,
+	      "leaving the shape it had, so the model and the grid still agree");
+
+	check(zd_cellgrid_create(client->content, 0, 0, 255, 255) == NULL,
+	      "a grid over the cap is refused rather than clipped");
+
+	check(zd_cellgrid_live_count() == grids_before + 1, "one grid is live");
+
+	zd_wm_window_close(client);
+	zd_wm_reap(wm);
+
+	check(zd_cellgrid_live_count() == grids_before,
+	      "closing the window releases the grid");
+	check(zd_cellgrid_cells_used() == cells_before, "and every cell it was holding");
+}
+
+/*
+ * The grid as a zapp sees it: handles and ownership.
+ *
+ * test_cellgrid() covered the model, so what is left is the layer that turns it
+ * into an ABI object -- and the check worth having is the same one the list has,
+ * because it is the one that is invisible until somebody tries it: a zapp
+ * holding another zapp's grid handle gets -EINVAL and not a board.
+ */
+static void test_grid(struct zd_wm *wm)
+{
+	struct zd_zapp_instance *mine = (struct zd_zapp_instance *)0xc1;
+	struct zd_zapp_instance *yours = (struct zd_zapp_instance *)0xc2;
+	lv_area_t want = { .x1 = 4, .y1 = 4, .x2 = 4 + 240 - 1, .y2 = 4 + 200 - 1 };
+	uint32_t before = zd_handle_live_count();
+	struct zd_client *client;
+	uintptr_t grid;
+	uintptr_t stale;
+
+	client = zd_wm_window_create(wm, "selftest grid api", &want);
+	if (client == NULL) {
+		check(false, "a window for the grid API checks could be created");
+		return;
+	}
+
+	grid = zd_grid_create(mine, client, 0, 0, 4, 4);
+	check(grid != 0, "a grid can be created through the ABI layer");
+
+	check(zd_grid_set_cell(mine, grid, 1, 1, "*", ZD_CELL_SUNKEN, 0xFF0000) == 0,
+	      "a cell can be set through a handle");
+	check(zd_grid_set_cell(mine, grid, 9, 9, "*", ZD_CELL_SUNKEN, 0) == -EINVAL,
+	      "and one off the board still cannot");
+
+	check(zd_grid_set_cell(yours, grid, 0, 0, "!", ZD_CELL_RAISED, 0) == -EINVAL,
+	      "another instance's grid handle does not resolve");
+	check(zd_grid_clear(yours, grid) == -EINVAL, "and cannot be cleared either");
+	check(zd_grid_resize(yours, grid, 2, 2) == -EINVAL, "or reshaped");
+
+	check(zd_grid_resize(mine, grid, 3, 7) == 0, "the owner can reshape it");
+	check(zd_grid_clear(mine, grid) == 0, "and clear it");
+	check(zd_grid_set_pos(mine, grid, 10, 20) == 0, "and move it");
+
+	check(zd_grid_live_count() == 1, "one grid widget is live");
+
+	stale = grid;
+	zd_grid_destroy(mine, grid);
+	check(zd_grid_clear(mine, stale) == -EINVAL,
+	      "a destroyed grid's handle stops resolving");
+
+	zd_wm_window_close(client);
+	zd_wm_reap(wm);
+
+	check(zd_grid_live_count() == 0, "no grid widget outlives its window");
+	check(zd_handle_live_count() == before, "and no handle does either");
+	check(zd_cellgrid_cells_used() == 0, "and every cell is back in the pool");
+}
+
+/*
+ * Timers, without ever letting one fire.
+ *
+ * lv_timer callbacks only run from lv_timer_handler(), which the desktop loop
+ * has not started yet -- so the fabricated owner pointers below are never
+ * dereferenced, the same trick and the same reason as the widget checks above.
+ * What is checked is the bookkeeping, which is where the bugs would be: a
+ * re-arm that quietly makes a second timer, a stop that leaves the slot taken,
+ * or an instance teardown that leaves one running into code that is about to be
+ * unmapped.
+ */
+static void test_timer(void)
+{
+	struct zd_zapp_instance *mine = (struct zd_zapp_instance *)0xd1;
+	struct zd_zapp_instance *yours = (struct zd_zapp_instance *)0xd2;
+	uint32_t before = zd_timer_live_count();
+	int spare;
+
+	check(zd_timer_start(NULL, 1000, 1) == -EINVAL, "a timer needs an owner");
+
+	check(zd_timer_start(mine, 1000, 1) == 0, "a timer can be started");
+	check(zd_timer_live_count() == before + 1, "and is counted");
+
+	check(zd_timer_start(mine, 250, 1) == 0, "starting the same id again succeeds");
+	check(zd_timer_live_count() == before + 1,
+	      "and re-arms the one that is there rather than making a second");
+
+	check(zd_timer_start(mine, 1000, 2) == 0, "a second id is a second timer");
+	check(zd_timer_live_count() == before + 2, "and is counted separately");
+
+	check(zd_timer_start(yours, 1000, 1) == 0,
+	      "another instance may use the same id, because ids are per instance");
+	check(zd_timer_live_count() == before + 3, "and gets its own slot");
+
+	/* Fill whatever is left, then prove the wall says so rather than
+	 * silently handing back a slot somebody else is using.
+	 */
+	spare = CONFIG_ZD_MAX_TIMERS - (int)zd_timer_live_count();
+	for (int i = 0; i < spare; i++) {
+		zd_timer_start(mine, 1000, (uint16_t)(100 + i));
+	}
+	check(zd_timer_live_count() == CONFIG_ZD_MAX_TIMERS, "the table fills");
+	check(zd_timer_start(mine, 1000, 999) == -ENOSPC, "and then refuses");
+
+	check(zd_timer_stop(mine, 999) == 0,
+	      "stopping one that is not running is not an error");
+	check(zd_timer_live_count() == CONFIG_ZD_MAX_TIMERS, "and changes nothing");
+
+	check(zd_timer_stop(mine, 2) == 0 &&
+		      zd_timer_live_count() == CONFIG_ZD_MAX_TIMERS - 1,
+	      "stopping a running one frees its slot");
+
+	zd_timer_owner_gone(mine);
+	check(zd_timer_live_count() == 1,
+	      "an instance going takes every timer it had, and none that it did not");
+
+	zd_timer_owner_gone(yours);
+	check(zd_timer_live_count() == 0, "and the other instance's too");
+}
+
+/*
  * What zapp_launch() refuses.
  *
  * Only the refusals: a successful request queues a real load, which would then
@@ -910,14 +1161,42 @@ void zd_selftest_run(const struct zd_session *session)
 
 void zd_selftest_run_wm(struct zd_wm *wm)
 {
+	/*
+	 * THE CHECKS MUST LEAVE THE DESKTOP AS THEY FOUND IT, and until
+	 * milestone M they did not.
+	 *
+	 * test_text() creates a text widget, a new text widget takes the caret,
+	 * and taking the caret calls zd_osk_wanted(true) -- which on a board
+	 * with CONFIG_ZD_OSK_AUTO raises the on-screen keyboard and, by design,
+	 * never lowers it again. So every boot on the CoreS3 came up with the
+	 * keyboard across the bottom half of a 240 px screen, put there by a
+	 * test, and the taskbar toggle was the only way to find out.
+	 *
+	 * It survived a whole milestone because QEMU has slop 0 and therefore
+	 * no OSK_AUTO, so the desktop this is developed on cannot show it. What
+	 * found it was building the QEMU image with the CoreS3's panel size and
+	 * touch slop -- see docs/hardware.md -- and then wondering why a click
+	 * on a Minesweeper cell arrived as the letter 'd'.
+	 */
+	bool osk_was = zd_osk_visible();
+
 	failures = 0;
 
 	test_wm(wm);
 	test_rowlist(wm);
 	test_list(wm);
+	test_cellgrid(wm);
+	test_grid(wm);
+	test_timer();
 	test_launch_request();
 	test_text(wm);
 	test_menu(wm);
+
+	if (zd_osk_visible() != osk_was) {
+		zd_osk_set_visible(osk_was);
+	}
+	check(zd_osk_visible() == osk_was,
+	      "the checks left the on-screen keyboard as they found it");
 
 	if (failures == 0) {
 		LOG_INF("selftest (wm): all checks passed");
