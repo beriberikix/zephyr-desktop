@@ -323,6 +323,15 @@ Two things make it safe rather than merely lucky:
   Each is a thin wrapper around a renamed static, so there is no early-return
   path that can leak the pin.
 
+Milestone L narrowed one of them, which is a rare direction for this file to
+move. The file picker used to hold the arbiter across `lv_obj_create()` while it
+built a row per file -- the display's own pin, held through LVGL object
+construction, which the rule above says never to do. Splitting the picker's model
+from its view for unrelated reasons (see `chrome/rowlist.h`) put the readdir loop
+and the widget building in different functions, so the bracket now covers only
+the readdir loop. The fix came free with a design decision made for a different
+reason, which is the good kind of luck but was still luck.
+
 `ZD_SPI_DC_MISO_ARBITER` depends on `ZD_ZAPP_LOAD_VIA_BUFFER`, and that
 dependency is load-bearing: the arbiter can only bracket filesystem calls this
 project makes itself, and `llext_fs_loader` reads the ELF from inside
@@ -343,6 +352,22 @@ taskbar leaves 212 px of usable height, a default 200×120 window cascades in
 reaches y=212, exactly the taskbar edge — so with several zapps open, later
 windows are partly hidden behind the taskbar. Cosmetic, not broken, and the drag
 clamp reads the screen size at runtime so windows can always be pulled back.
+
+### The file browser, and rows under a thumb
+
+`zapps/files` puts a scrolling list on a 320x240 panel, and the arithmetic works
+out: rows are `16 + CONFIG_ZD_TOUCH_SLOP_PX` = 28 px here, so a 212 px content
+area shows about six of them in a default 200x120 window and more if it is
+resized. Rows are made taller rather than given hit slop, for the reason the
+whole of the next section exists.
+
+**Not yet judged by thumb on the device**, and there are two specific questions
+this file wants answers to. Whether a 28 px row can be tapped without the press
+being read as the start of a scroll -- LVGL's `scroll_limit` is 10 px, so a
+thumb that rolls more than that during a tap scrolls the list instead of
+selecting. And whether double-tap-to-open is comfortable at a 400 ms window with
+the same 10 px tolerance, or whether opening needs a menu item on this board.
+`File -> Open` exists partly so that there is an answer if it does not.
 
 ## Touch: two things had to be fixed
 
@@ -483,7 +508,7 @@ not to be, it belongs in this section rather than being shipped quietly.
 ## What has and has not run on hardware
 
 **Confirmed on the device, end to end:** boot; the ili9342c display; the full
-51-check selftest on Xtensa; the FT6336 touch panel; the launcher opening on tap
+selftest on Xtensa (51 checks at the time, 160 as of milestone L); the FT6336 touch panel; the launcher opening on tap
 and listing the three discovered zapps; tapping `hello`, which reads the `.llext`
 off the filesystem, relocates an **Xtensa shared object** through the buffer
 loader into the Harvard instruction/data heaps, and draws

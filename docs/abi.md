@@ -4,7 +4,7 @@ The contract is `include/zd/zapp_abi.h`. This document explains the parts of it
 that a header comment cannot: why it is shaped this way, and what it does *not*
 promise.
 
-Current version: **0.5**.
+Current version: **0.6**.
 
 ## Shape
 
@@ -40,8 +40,8 @@ A vtable rather than a pile of exported functions because it:
   with, and inserting a value renumbers everything after it with nothing in the
   versioning machinery to notice. The key codes are spelled as `#define`s with
   explicit values so this is impossible to miss.
-- The **event union may grow**, and did in 0.5. That is safe and `sizeof(struct
-  zd_event)` is deliberately *not* pinned: a zapp only ever reads the event
+- The **event union may grow**, and did in 0.5 and again in 0.6. That is safe
+  and `sizeof(struct zd_event)` is deliberately *not* pinned: a zapp only ever reads the event
   through a pointer the desktop handed it, and only members it knows about. What
   may not change is where anything already there lives, which the header states
   as `_Static_assert`s on every existing member's offset. Offsets are the rule;
@@ -309,10 +309,61 @@ Only one drop-down is open at a time, desktop-wide, and `ZD_EV_MENU` is
 delivered *after* it has been dismissed. Closing your own window from that
 handler is therefore safe, which is what File → Exit needs.
 
+## Lists
+
+Added in 0.6, and the reason a file browser was not possible before it.
+`label_create()` shows a string and `text_create()` edits one; neither is a way
+to choose between many things, and a zapp cannot draw its own rows because it
+never sees an `lv_obj_t`.
+
+**A list is a model, not a picture**, and that is the whole of what a zapp needs
+to understand. `list_clear()` and `list_add_item()` change what the list *is*,
+immediately: `list_get_count()`, `list_get_selected()` and `list_get_item_text()`
+all answer from the model the instant you call them. Only the rows on screen lag,
+by at most one turn of the desktop loop.
+
+That is what makes it safe to empty and refill a list from inside
+`ZD_EV_LIST_ACTIVATE` — which is precisely what "the user opened this directory"
+means, and which would otherwise be the use-after-free this whole project is
+organised around avoiding. It is also not a new idea: it is the rule the window
+manager already applies to stacking order, where the `sys_dlist_t` is the truth
+and LVGL's child order is a projection re-applied from the loop.
+
+Two events:
+
+- `ZD_EV_LIST_SELECT` — the selection moved, by click or by arrow key.
+  **Cheap by contract.** It fires on every arrow key, so do no filesystem I/O in
+  it. Whatever you want to show about the selected thing you already had while
+  you were filling the list — `fs_readdir` hands you the size and the type — so
+  cache it there. On a board where storage borrows the display's pin, a stat per
+  keystroke stops the screen drawing while the user holds Down. Same reasoning
+  as `ZD_EV_RESIZED` arriving on release rather than per pointer sample.
+- `ZD_EV_LIST_ACTIVATE` — a row was double-clicked, or Enter was pressed on it.
+
+`list_clear()` clears the selection rather than preserving the index. Row 3 of
+the new contents is not the thing row 3 used to be, and carrying it across is how
+you delete the wrong file.
+
+`list_get_capacity()` exists for the same reason `text_get_capacity()` does: the
+bound is the desktop's, it differs between boards, and a zapp that guessed would
+either refuse to show a directory it could have shown or stop listing partway
+down one without saying so. `list_add_item()` past it returns `-ENOSPC`.
+
+`list_get_item_text()` is **not** short by contract, unlike `text_get_text()` and
+`fs_read()`. A row is one line, and half a filename still names a file — so it
+refuses with `-ENOSPC` rather than truncating, the same promise
+`dialog_get_path()` makes.
+
+Double-click is LVGL's, not the desktop's. `lv_indev` already tracks click
+streaks, and its thresholds are better than a hand-rolled timer's would have
+been: the interval is the long-press time and the movement tolerance is the
+scroll limit — *the same number that decides whether the gesture was a scroll*.
+A finger that travelled far enough to scroll the list was scrolling it.
+
 ## Dialogs
 
-Two, both provided by the desktop: a confirm box, and a file picker that walks
-the filesystem through the session's permissions.
+Three, all provided by the desktop: a confirm box, a file picker that walks the
+filesystem through the session's permissions, and a one-line text prompt.
 
 **Both are asynchronous.** They return as soon as the dialog is up and the answer
 arrives later as `ZD_EV_DIALOG`. There is no modal loop anywhere in this project
@@ -332,6 +383,50 @@ user tapped the wrong place is how work gets lost.
 A dialog belongs to the instance that asked for it. If that zapp dies with one
 open, the desktop takes it down — otherwise a modal shade outlives its owner and
 the whole screen stops responding.
+
+`dialog_prompt()` arrived in 0.6 with the file browser. Confirm answers a
+question the desktop asked and the picker answers "which of these"; neither
+answers "what shall it be called", which is what naming a new folder needs. Its
+answer comes back from `dialog_get_text()`, on the same split — the event says
+what happened, a call says how much. An empty field is not an answer: OK stays
+inert until something is typed, and Cancel is how the user declines.
+
+The picker gained **directory navigation** in 0.6. It shows folders as well as
+files, enters them on a double-click, and comes back up through a `..` row that
+is floored at the directory you named — a picker opened on `ZD_DIR_TMP` cannot
+walk out of `/tmp`. There is deliberately no `enum zd_dir` member naming the
+parent of anything: the floor is a string the caller already gave, and asking the
+session for one would make "up" mean something different depending on where you
+started.
+
+## Launching another zapp
+
+`zapp_launch(name, arg)`, added in 0.6, is the second thing in this ABI that is
+a property of the desktop rather than of your instance — the clipboard was the
+first — and it is what makes double-clicking a document mean anything.
+
+`name` is a **discovered zapp name, not a path**. It resolves through the same
+scan the Start menu uses, so this cannot be talked into `llext_load()`ing an
+arbitrary file. Given how carefully the rest of this document hedges about
+permissions, it is worth saying that this one is a real property of the design.
+
+`arg` is yours to define with whoever you are launching. **There is no
+association registry.** A zapp that opens documents decides what it accepts, and
+a zapp that launches one has to know; the file browser hardcodes `notepad` and
+says so in its own source rather than implying a lookup that does not exist.
+
+Asynchronous, like the dialogs and for a sharper version of the same reason:
+loading an extension reads a file and runs its `init()`, neither of which may
+happen on a stack frame inside your event callback. Everything checkable comes
+back from the call — a bad name, an unknown zapp, no free slot, an argument too
+long. Only what cannot be known without doing the work is logged instead: a
+corrupt image, a refused ABI, llext out of heap.
+
+`ZD_ZAPP_FLAG_SINGLETON` is **enforced as of 0.6**, having been defined and
+ignored since 0.1. A running singleton has its frontmost window raised and
+focused and is sent `ZD_EV_LAUNCH_ARG` instead of getting a second instance.
+Read what was asked for with `get_launch_arg()`, which is valid from `init()`
+onwards for the life of the instance.
 
 ## The clock
 

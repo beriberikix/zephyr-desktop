@@ -215,16 +215,26 @@ config ZD_FS_AUTOFORMAT
 	  destroy it".
 
 config ZD_SEED_BUILTIN_ZAPPS
-	bool "Install the built-in apps into /system/apps at boot"
+	bool "Install the built-in zapps into /system/zapps at boot"
 	default y
 	help
-	  Writes the .llext files embedded in the image to the filesystem if they
-	  are absent. This is a stand-in for an installer on targets whose storage
-	  is blank at every boot, such as the QEMU RAM disk.
+	  Writes the .llext files embedded in the image to the filesystem if what
+	  is there does not match them byte for byte. A stand-in for an installer
+	  on targets whose storage is blank at every boot, such as the QEMU RAM
+	  disk.
 
-	  Turn it off where storage persists and apps arrive by other means -- on
-	  hardware with an SD card, seeding would defeat the point of checking
-	  that a .llext can arrive as a genuinely external file.
+	  On a board with persistent storage it is a per-board judgement, and the
+	  two hardware targets here answer it differently on purpose:
+
+	  mimxrt1060_evk has it OFF. That checkpoint exists to prove a .llext can
+	  arrive as a genuinely external file, so the desktop must find zapps it
+	  did not write itself; seeding would make the check vacuous.
+
+	  m5stack_cores3 has it ON. Seeding is itself a write to a card that
+	  shares a pin with the display, so it exercises the arbiter on every
+	  boot, and it means a plain FAT-formatted card boots to a populated
+	  desktop rather than an empty one. External delivery is still checkable
+	  there: delete a zapp from the card and copy your own in.
 
 config ZD_ZAPP_LOAD_VIA_BUFFER
 	bool "Read a zapp into RAM before loading it, instead of streaming from the file"

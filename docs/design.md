@@ -816,9 +816,13 @@ confined to `open_loader()` in `zapp_instance.c` -- with discovery, the ABI, the
 WM and the shim untouched -- is the strongest evidence so far that the layering
 holds. Details in `docs/hardware.md`.
 
-**[H]** Seeding built-in zapps is now `CONFIG_ZD_SEED_BUILTIN_ZAPPS`, off on hardware. The
-point of the checkpoint is that a `.llext` arrives from outside, so the desktop must find
-zapps it did not write itself.
+**[H]** Seeding built-in zapps is now `CONFIG_ZD_SEED_BUILTIN_ZAPPS`, off on *this* board.
+The point of the checkpoint is that a `.llext` arrives from outside, so the desktop must
+find zapps it did not write itself. Not a rule for hardware in general, and the CoreS3
+later took the other answer deliberately: seeding is itself a write to a card sharing a pin
+with the display, so it exercises the arbiter every boot, and a plain FAT card then boots
+to a populated desktop. External delivery stays checkable there by deleting a zapp and
+copying your own in. The Kconfig help states both.
 
 ### I — Storage in the zapp ABI — **DONE (ABI 0.3)**
 
@@ -1062,11 +1066,108 @@ the out-of-tree story `include/zd/` exists to protect. Notepad asks instead —
 `text_get_capacity()` was added for exactly this — and keeps its own
 `NP_MAX_INSTANCES`.
 
+### L — A file browser, and the OS underneath it — **DONE (ABI 0.6)**
+
+§9 named the file browser and the terminal as the next two zapps and said the
+browser was the cheaper one. It was, but not for the reason given there.
+
+The expectation was that a browser would need storage. It needed none:
+`fs_opendir`, `fs_readdir`, `fs_stat`, `fs_mkdir` and `fs_unlink` have been
+zapp-facing vtable slots since **0.3** and no zapp had ever called one of them —
+storage arrived for Notepad, which only ever opened a path somebody else had
+chosen. `struct zd_dirent` already carried everything Zephyr's `struct fs_dirent`
+has. What was missing was a way to *show* a directory: a zapp never sees an
+`lv_obj_t`, and the only content slots were a label and a text field.
+
+51. ✅ **`ZD_PATH_MAX` 96 → 192**, first, so nothing later needed re-auditing.
+    Safe because the constant is in no struct in the header and every host call
+    that writes a path into a caller's buffer is told its size — so raising it
+    moves no offset. `ZD_NAME_MAX` is the counter-example and now says so: it
+    *is* an array bound inside `struct zd_dirent`, `fs_readdir` has no length
+    parameter, and raising it would smash a correctly-versioned 0.5 zapp's stack
+    with nothing in the version gate able to notice. Frozen.
+52. ✅ **`chrome/rowlist.c`**, a scrolling column of selectable rows, shared by
+    the ABI widget and the file picker. Model and view are separate; see the
+    finding below.
+53. ✅ **`zd_list_t` in the ABI**, over the rowlist, exactly as `text_api.c`
+    layers over `lv_textarea`. Plus `label_set_pos()` and `label_destroy()`,
+    because 0.5 could create a label and then neither move nor free it — which
+    survived only because no label's position depended on anything, and a status
+    line along the bottom of a resizable window is the first that does.
+54. ✅ **The file picker rebuilt on it, with the navigation §8 listed as
+    missing.** Folders show, `..` comes back up, and the floor is the directory
+    the caller named rather than the volume root.
+55. ✅ **`dialog_prompt()`**, the third dialog kind. Confirm answers a question
+    the desktop asked, the picker answers "which of these"; neither answers
+    "what shall it be called".
+56. ✅ **`zapp_launch(name, arg)` and `get_launch_arg()`.** The second desktop
+    *service* after the clipboard, and what makes double-clicking a document
+    mean anything. Deferred through the loop rather than run inline like the
+    Start menu's launch, because the caller is another zapp.
+57. ✅ **`ZD_ZAPP_FLAG_SINGLETON` enforced**, having been defined and ignored
+    since 0.1.
+58. ✅ **`zapps/files/`**, the browser. Navigates in place, folders first, a
+    status line, New Folder and Delete, and a double-clicked `.txt` handed to
+    Notepad.
+59. ✅ **Boot checks 102 → 160**, and two bugs found on the way: see below.
+
+**[L] The model/view split is what makes a rebuildable widget safe.** Entering a
+directory means emptying and refilling the list from inside the dispatch of a row
+in that list — CLAUDE.md's central hazard, met a fifth time. Rather than another
+ad-hoc deferral, the list keeps a model that the zapp mutates and a view the loop
+re-derives. Getters answer from the model immediately, so nothing has to reason
+about when the pixels catch up. This is not new law: it is what the WM already
+does with `sys_dlist_t` and z-order. Two things fell out of it that the safety
+argument alone would not have bought — the picker's habit of keeping filenames
+alive by reading them back off LVGL labels is gone, and the bus arbiter no longer
+wraps `lv_obj_create()`, because filling the model and building rows ended up in
+different functions on their own.
+
+**[L] LVGL sends `DOUBLE_CLICKED` before `CLICKED`, to the same object.** So a
+double-click on a directory row runs activate, the zapp rebuilds the model, and
+*then* a click arrives at the same still-alive row carrying an index into a
+listing that no longer exists. Two guards: clearing hides the container at once
+so no new press can reach a stale row, and every row callback re-validates
+against the dirty flag first. Worth knowing before writing the code rather than
+after — and the reason to use LVGL's streak detection at all is that its
+thresholds are better than a hand-rolled timer's: the movement tolerance is the
+scroll limit, so a finger that travelled far enough to scroll the list was
+scrolling it.
+
+**[L] Every menu bar since K has been spaced by an LVGL default.**
+`zd_menu_add_submenu()` placed each title after the previous one by summing
+`lv_obj_get_width()` — read immediately after `lv_obj_set_size()` and therefore
+before any layout pass, so it answered 130 px instead of the ~33 px a title
+actually is. CLAUDE.md has stated that rule since K; this was it being broken
+three lines after it was written down. Visible as a wide dead gap between File
+and Edit, which reads as slightly odd rather than as a bug — and invisible and
+far worse on a window narrower than about 260 px, where the second title lands
+past the end of the bar and cannot be clicked at all. Notepad's window happened
+to be wide enough; the browser's is not, and hunting for its unreachable Go menu
+is what turned this up. The boot check that should have caught it asserted only
+that adjacent titles do not *overlap*, and two titles a hundred pixels apart do
+not overlap. It now asserts they sit edge to edge.
+
+**[L] `app/smoke.conf` never existed.** CLAUDE.md has documented
+`-DEXTRA_CONF_FILE=smoke.conf` since K and the file was never committed, so the
+command always failed at CMake time — and a failed configure leaves the previous
+build directory intact, so running the smoke test afterwards executes the last
+good image and reports a pass. The same stale-binary trap as K's filtered build
+log, reached from a new direction: not a hidden error this time, but a build that
+never ran.
+
+**[L] A zapp had never been refused by the permission shim.** Notepad only wrote
+where a picker had already sent it. New Folder in `/system/zapps` is the first
+time a zapp has asked for something it could not have, and it correctly gets
+`-EACCES` and says "This folder is read-only" — raising that complaint from
+inside another dialog's answer, which is the chained-dialog path K built and
+nothing had used.
+
 ---
 
 ## 8. Explicitly deferred
 
-Named so they don't leak into the MVP: any *further* catalog zapp (file browser, image
+Named so they don't leak into the MVP: any *further* catalog zapp (image
 viewer, media player, terminal, web server, web browser); hardware acceleration (PXP
 exists and is one Kconfig away — not now); MCU→MPU responsive layout morph; **maximise**,
 window snapping, and resize from any edge but the bottom-right corner; notifications;
@@ -1095,15 +1196,37 @@ actually wanted rather than imagined:
   time into a document the user then saves. A made-up time in a corner of the
   taskbar is a nicety; the same number written into a file is a small lie with a
   long life. Worth having when both halves are real.
-- **Navigation in the file picker.** It lists one well-known directory and shows
-  files only.
 - **A keyboard layout that is not US.** `input/keymap.c` says so at the top.
+
+New to this list after milestone L:
+
+- **File associations.** `zapp_launch()` takes a zapp name, and the browser
+  hardcodes `.txt` → `notepad` and says so in its own source. A registry is the
+  honest version, and it wants somewhere to live -- a file under `/system` that
+  the desktop reads at boot -- rather than a table compiled into one zapp.
+- **Rename.** `fs_rename` exists and the prompt dialog exists, so the dialog
+  version is a few lines. The version worth having renames in place, in the row,
+  which is its own piece of work.
+- **Noticing that somebody else changed a directory.** Nothing notifies anyone
+  of anything in this desktop. The browser refreshes when you navigate; if
+  Notepad saves a file into the folder you are looking at, you will not see it
+  until you leave and come back. A change-notification service is the general
+  answer and the taskbar would want it too.
+- **Sorting, and any column but the name.** Folders come first and then
+  whatever order the filesystem gave. There is one proportional font and no
+  table widget, and "Modified" is impossible for a third separate reason --
+  `struct zd_dirent` has no timestamp, Zephyr's `struct fs_dirent` has none to
+  give, and `clock_now()` still has no date in it.
+- **Multi-select.** `list_create()` takes a flags word with nothing defined in
+  it, which is where that would go.
 
 **Filesystem access from a zapp left this list in ABI 0.3** — see milestone I.
 **Window resize, minimise, the taskbar window list and `ZD_EV_WINDOW_CLOSE_REQUEST` left
 it in ABI 0.4** — see milestone J.
 **Keyboard input, the clipboard, and the text editor left it in ABI 0.5** — see
 milestone K.
+**The file browser, list widgets, picker navigation and launching one zapp from
+another left it in ABI 0.6** — see milestone L.
 
 ---
 
@@ -1143,6 +1266,15 @@ milestone K.
   the list — a text widget, a clipboard, menus and dialogs. The terminal
   (`WANTS_THREAD`) and the file browser (a list widget, and the picker's missing
   navigation) are the next two, and both are now cheaper than they were.
+- ~~**Second post-MVP zapp.**~~ **[L] Answered: the file browser.** The list
+  widget and the picker's navigation were predicted correctly. What was not is
+  that it needed *nothing* from storage — every call it makes had been in the
+  ABI unused since 0.3 — and that it would force a way for one zapp to launch
+  another, which is the first thing here that makes two zapps cooperate. **The
+  terminal is the remaining one**, and it is the expensive one:
+  `ZD_ZAPP_FLAG_WANTS_THREAD` is now the only flag still defined and not
+  honoured, and honouring it means locking discipline, priorities, and tearing
+  down a thread that may be blocked. Nothing about L made it cheaper.
 
 ## 10. Verification
 

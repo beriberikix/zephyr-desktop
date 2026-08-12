@@ -18,9 +18,12 @@ Two things are load-bearing and get real care. Everything else may be scrappy:
 1. **The WM data model and event loop** (`app/src/wm/`) — modelled on a tiny X11 stacking
    WM. A `zd_client` struct plus one central dispatch path.
 2. **The zapp ABI** (`include/zd/zapp_abi.h`) — designed as if the terminal, text editor and
-   file browser already ran on it. Storage arrived in 0.3, window state in 0.4, and
-   0.5 is what Notepad needed: keyboard input, an editable text widget, a clipboard,
-   menus, dialogs and a clock.
+   file browser already ran on it. Storage arrived in 0.3, window state in 0.4,
+   0.5 is what Notepad needed (keyboard input, an editable text widget, a clipboard,
+   menus, dialogs and a clock), and 0.6 is what the file browser needed: a list
+   widget, a text-prompt dialog, and one zapp launching another with an argument.
+   The browser needed *nothing* new from storage -- every filesystem call it makes
+   had been in the ABI, unused, since 0.3.
 
    The append-only rule covers `enum zd_event_type` and the `ZD_KEY_*` constants as
    well as the vtable. New values go on the *end*, never next to the ones they belong
@@ -94,7 +97,8 @@ manifest/west.yml   the pin. This dir exists only so topdir can be the repo root
 include/zd/         the app ABI. No Zephyr and no LVGL headers may appear here.
 app/                the desktop image (the Zephyr application)
   src/wm/           client struct, stacking, focus, drag/resize, handle registry
-  src/chrome/       retro bevels, titlebar, palette
+  src/chrome/       retro bevels, titlebar, palette, and the shared row list
+                    the ABI's list widget and the file picker are both built on
   src/shell/        background, taskbar, launcher, clock, window list
   src/host/         host-API vtable, fs shim + zapp storage, session
   src/loader/       llext discover/load/instance/unload, boot seeding
@@ -103,7 +107,8 @@ app/                the desktop image (the Zephyr application)
 zapps/              desktop apps. Named zapps/, not apps/, so it is never misread
                     as Zephyr's app/. Several files each since ARM moved to
                     LLEXT_TYPE_ELF_RELOCATABLE; zapps/lib/ is the no-libc helpers
-                    they share. hello stays one file on purpose.
+                    they share. hello stays one file on purpose. files/ is the
+                    browser, and the only ZD_ZAPP_FLAG_SINGLETON zapp.
 zephyr/ modules/    west-managed, gitignored
 ```
 
@@ -155,8 +160,20 @@ QEMU then happily ran the previous ELF and reported a false pass.
     **Opening is deferred too.** Generalise from this: any surface rebuilt *in response
     to* an event needs the treatment, not just one destroyed by an event.
 
+  - **A list widget's rows**, which is the fifth and the one that stopped being
+    ad-hoc. A zapp answers `ZD_EV_LIST_ACTIVATE` by emptying and refilling the
+    very list whose row is dispatching. Rather than a sixth flag, `chrome/rowlist.c`
+    keeps a **model** the zapp mutates and a view the loop re-derives — which is
+    the same rule the WM already applies to z-order, and it makes the safety
+    structural rather than something every caller has to remember. Getters answer
+    from the model immediately, so nobody has to reason about when the pixels
+    catch up. Generalise from *this* one: a surface that is rebuilt often enough
+    wants a model, not another deferral.
+
   Everything deferred is drained from `main()`'s loop in a fixed order — windows,
-  instances, taskbar, menu, dialog, then queued keys — and the order is load-bearing.
+  instances, queued launches, taskbar, menu, dialog, lists, then queued keys — and
+  the order is load-bearing. Lists come after dialogs specifically, because
+  `zd_dialog_reap()` builds the file picker and fills its model during that call.
 - **Keys are queued, and touching LVGL off the desktop thread is the bug the queue
   prevents.** A key arrives on Zephyr's input thread; everything downstream of routing it
   — the text widget, a dialog's field, a zapp's `event()` — is LVGL's, and only the
@@ -176,6 +193,17 @@ QEMU then happily ran the previous ELF and reported a false pass.
   board fragment. Met a third time in K with menu bars; `chrome/menu.c` sizes titles and
   rows from the slop, and the on-screen keyboard sidesteps it entirely by being one
   `lv_buttonmatrix`, whose grid cannot overlap by construction.
+- **Never read a size back off LVGL to compute the next thing's position.**
+  `lv_obj_set_size()` does not take effect until a layout pass, so
+  `lv_obj_get_width()` right after it answers the *default* -- 130 px for a bare
+  `lv_obj`. Milestone K spaced every menu bar that way, which gave a dead gap
+  between File and Edit and put the second title off the end of any window
+  narrower than about 260 px, where it cannot be clicked at all. It survived a
+  whole milestone and a boot check, because that check asserted only that
+  adjacent titles do not *overlap* -- and two titles a hundred pixels apart do
+  not. Keep the value you set (`struct menu::title_w`); the model is the truth
+  here as everywhere else. Where a read-back is genuinely needed,
+  `lv_obj_update_layout()` first -- see `label_width()` in the same file.
 - **The WM's `sys_dlist_t` is the truth for z-order**, not LVGL's child order. LVGL is a
   projection, re-applied by `zd_wm_restack()` using `lv_obj_move_to_index()`. Note
   `lv_obj_move_foreground()` exists only in LVGL's v8 compatibility shim
