@@ -1,16 +1,28 @@
 # Hardware targets
 
-Two boards: the **MIMXRT1060-EVK** (headless, milestone H) and the
-**M5Stack CoreS3** (a self-contained touchscreen device, and the project's
-second architecture). Jump to [CoreS3](#m5stack-cores3) for the latter.
+Two boards, in very different states:
+
+| Board | State |
+|---|---|
+| [M5Stack CoreS3](#m5stack-cores3) | **The whole desktop runs on it, by touch.** 320×240, Xtensa, zapps off a microSD card. |
+| [MIMXRT1060-EVK](#mimxrt1060-evk) | Builds and is configured. **Never run on silicon.** |
+
+If you are porting to a third board, the CoreS3 half is the more useful read:
+it is where every assumption that turned out to be ARM-shaped, QEMU-shaped or
+mouse-shaped got found. [Kconfig traps](#kconfig-traps-when-porting) at the end
+applies to any target.
 
 ## MIMXRT1060-EVK
 
-The hardware checkpoint is deliberately **headless**. No panel is attached yet,
-so the desktop runs against a dummy display controller: the WM, the loader, the
-filesystem and the zapp ABI are all exercised on real Cortex-M7 silicon, and only
-the pixels are absent. LVGL still renders into a buffer, so this is a real run
-rather than a compile check.
+> **Nothing below has been run on hardware.** The board builds, the
+> configuration is complete and the reasoning has been checked against the SoC
+> and Zephyr trees — but no one has flashed it. Treat this section as a
+> considered plan, not a report. Where it says "expect", that is a prediction.
+
+Deliberately **headless**: no panel is attached, so the desktop runs against a
+dummy display controller. The WM, the loader, the filesystem and the zapp ABI
+would all be exercised on real Cortex-M7 silicon, with only the pixels absent —
+LVGL still renders into a buffer.
 
 ## Why this board is a good bet
 
@@ -42,7 +54,6 @@ interface for this milestone.
 ## Running it
 
 ```sh
-export ZEPHYR_SDK_INSTALL_DIR=~/zephyr-sdk-1.0.1
 west build -p -b mimxrt1060_evk/mimxrt1062/qspi app -d build-rt1060
 ```
 
@@ -71,41 +82,39 @@ The desktop has no input device here, so it cannot be driven — the interesting
 output is the boot sequence:
 
 ```
+zephyr-desktop v0.1.0 (<commit>), zapp ABI 0.7
 mounted /SD:
 session uid=1000 user='user' home='/SD:/home/user'
 selftest: all checks passed
-discovered app 'hello' at /SD:/system/zapps/hello.llext
-discovered N app(s)
+selftest (wm): all checks passed
+discovered zapp 'hello' at /SD:/system/zapps/hello.llext
+discovered 6 zapp(s)
 zephyr-desktop up on <display>
 ```
 
-That alone is the checkpoint: a filesystem the desktop did not create, zapps it
-did not install, and the permission and handle checks passing on real silicon.
+That alone would be the checkpoint: a filesystem the desktop did not create,
+zapps it did not install, and the permission and handle checks passing on real
+silicon.
 
-To prove load/unload without a pointer, temporarily launch from `main()` after
-`zd_launcher_init()`:
+To prove load and unload without a pointer, build with the smoke test rather
+than patching `main()` — it launches every zapp, closes every window and asserts
+that the client, handle and open-file counters return to their boot values:
 
-```c
-struct zd_zapp_entry entry[ZD_MAX_DISCOVERED];
-int n = zd_zapps_discover(&session, entry, ZD_MAX_DISCOVERED);
-if (n > 0) {
-        zd_zapp_launch(&entry[0]);
-}
+```sh
+west build -p -b mimxrt1060_evk/mimxrt1062/qspi app -d build-rt1060 \
+    -- -DEXTRA_CONF_FILE=smoke.conf
 ```
 
-Expect `llext: Loaded extension hello`, `launched 'Hello' instance 1 (ABI 0.2)`,
-and `[Hello] hello world`.
+The last line is `SMOKE: PASS after N round(s)`, or an explanation.
 
-## Numbers to record
-
-- `west build` footprint (FLASH and RAM) — compare against the QEMU figures.
-- Whether the SD mount succeeds first try; `power-delay-ms = <1000>` in the board
-  dtsi suggests card power-up timing has bitten people before.
+Two things to write down on a first run, because neither is predictable from
+here: the SD mount succeeding first try — `power-delay-ms = <1000>` in the board
+dtsi suggests card power-up timing has bitten people before — and the actual
+FLASH and RAM figures against the ~368 KB this currently builds to.
 
 ## When a panel arrives
 
-Buying an `rk043fn66hs_ctg` upgrades this milestone to the full graphical
-desktop:
+An `rk043fn66hs_ctg` shield would upgrade this to the full graphical desktop:
 
 1. Build with `-DSHIELD=rk043fn66hs_ctg`.
 2. Delete the `dummy_dc` node from the overlay; the shield supplies
@@ -122,11 +131,15 @@ in the layering, not in the port.
 
 # M5Stack CoreS3
 
-`m5stack_cores3/esp32s3/procpu`. Unlike the RT1060 this is a finished device --
-320×240 capacitive touchscreen, microSD, battery, no ribbon cables -- and it is
-the only target that is **not ARM**. That is the point of having it: everything
-above the loader is arch-agnostic by construction, and this is the board that
-tests the claim rather than repeating it.
+`m5stack_cores3/esp32s3/procpu`, configured in
+`app/boards/m5stack_cores3_esp32s3_procpu.conf`. Unlike the RT1060 this is a
+finished device -- 320×240 capacitive touchscreen, microSD, battery, no ribbon
+cables -- and it is the only target that is **not ARM**. That is the point of
+having it: everything above the loader is arch-agnostic by construction, and
+this is the board that tests the claim rather than repeating it.
+
+**This one has actually been run**, by thumb, with zapps loaded off a card.
+Everything below is a report rather than a plan.
 
 The board DTS already chooses everything the desktop looks for, so the touch
 panel reaches LVGL with no code of ours:
@@ -167,8 +180,11 @@ ABI, the WM, the handle registry or the permission shim changes.
 
 - **ESP32-S3 is Harvard.** `CONFIG_LLEXT_HEAP_SIZE` does not exist here; the heap
   splits into `LLEXT_INSTR_HEAP_SIZE` and `LLEXT_DATA_HEAP_SIZE`, whose defaults
-  (4 KB / 8 KB) are far too small. Kconfig at least *warns* when you set the
-  wrong one, unlike the silent `select` override that bit the RT1060 conf.
+  (4 KB / 8 KB) are far too small. This board runs **48 KB instruction, 40 KB
+  data**, sized rather than rounded up because DRAM is the scarce thing here —
+  see the reasoning in the board fragment. Kconfig *warns* when you set the
+  single ARM symbol instead, which is a finding rather than noise; see
+  [Kconfig traps](#kconfig-traps-when-porting).
 - `CONFIG_SYS_HEAP_BIG_ONLY=y`, or the IRAM heap faults during init.
 - Extensions build as **ELF shared objects** (`LLEXT_TYPE_ELF_SHAREDLIB` is the
   Xtensa default), not the relocatable objects ARM produces.
@@ -295,7 +311,7 @@ Upstream's answer today is to give up one of the two: the `m5stack_cores3/esp32s
 variant ships with `&mipi_dbi { status = "disabled"; }` and a comment telling you
 to delete `SPIM2_MISO_GPIO35` from pinctrl if you want the screen instead.
 
-### What we do instead
+### What this project does instead
 
 Arduino's M5GFX keeps both alive by flipping the pin's direction on every
 chip-select change. `CONFIG_ZD_SPI_DC_MISO_ARBITER` is the same trick at a
@@ -413,13 +429,11 @@ area shows about six of them in a default 200x120 window and more if it is
 resized. Rows are made taller rather than given hit slop, for the reason the
 whole of the next section exists.
 
-**Not yet judged by thumb on the device**, and there are two specific questions
-this file wants answers to. Whether a 28 px row can be tapped without the press
-being read as the start of a scroll -- LVGL's `scroll_limit` is 10 px, so a
-thumb that rolls more than that during a tap scrolls the list instead of
-selecting. And whether double-tap-to-open is comfortable at a 400 ms window with
-the same 10 px tolerance, or whether opening needs a menu item on this board.
-`File -> Open` exists partly so that there is an answer if it does not.
+Two constraints to know if you change this. A press that moves more than
+LVGL's `scroll_limit` (10 px) becomes a scroll rather than a selection, so a
+rolling thumb picks nothing. And double-tap-to-open runs on a 400 ms window with
+the same 10 px tolerance. `File -> Open` exists partly so there is a way through
+that does not depend on either.
 
 ### A CoreS3-shaped QEMU image, which you should build before believing anything
 
@@ -446,15 +460,19 @@ exact reproduction of every layout and touch-slop decision, in seconds, with a
 console you can grep. Everything in "Layout at 320x240" is now checkable without
 a cable.
 
-It earned its keep immediately. Milestone M found that **the boot selftests had
-been leaving the on-screen keyboard raised on this board since milestone K** —
-`test_text()` creates a text widget, a text widget takes the caret, and taking
-the caret calls `zd_osk_wanted(true)`, which on a board with
-`CONFIG_ZD_OSK_AUTO` raises the keyboard and by design never lowers it. So the
+It earned its keep immediately, by finding a bug that had shipped on this
+board for two milestones: **the boot selftests were leaving the on-screen
+keyboard raised.** `test_text()` creates a text widget, a text widget takes the
+caret, and taking the caret calls `zd_osk_wanted(true)`, which on a board with
+`CONFIG_ZD_OSK_AUTO` raises the keyboard and by design never lowers it. The
 desktop came up with a soft keyboard over the bottom half of the screen, put
-there by a test. It cannot happen on the real QEMU target, which has slop 0 and
-therefore no `OSK_AUTO`. It presented here as a tap on a Minesweeper cell
-arriving as the letter `d`.
+there by a test, and it presented as a tap on a Minesweeper cell arriving as the
+letter `d`. It cannot happen on the real QEMU target, which has slop 0 and
+therefore no `OSK_AUTO`.
+
+Fixed — `zd_selftest_run_wm()` now saves and restores the keyboard's state and
+asserts that it did. The general rule it produced: **a boot check must leave the
+desktop as it found it.**
 
 ### Minesweeper is 9x3 here, and that is the honest answer
 
@@ -484,11 +502,14 @@ this particular application, which is a thing a desktop should be able to say
 out loud. The alternatives — a scrolling minefield, or cells too small to tap —
 are both worse than saying it.
 
-**Not yet judged by thumb**, and the question this file wants an answer to is
-whether **hold-to-flag** is comfortable: it is `long_press_time` (400 ms) with a
-10 px movement tolerance, and a thumb that rolls during a deliberate hold reads
-as a drag. If it does not work there is no fallback gesture, because there is no
-second button — it would have to become a mode toggle in the Game menu.
+**Judged on the device: a 9x3 board is useful here**, so the zapp does not
+refuse to start on a small screen and the deferred "grid that scrolls" stays
+deferred. The pessimistic reading above was written before anyone tried it and
+was wrong — the clamp behaves better in a hand than it does on paper, which is
+the whole reason `grid_fit()` picks the board rather than a constant.
+
+What is still unverified is **hold-to-flag**; see [Still
+unverified](#still-unverified).
 
 ## Touch: two things had to be fixed
 
@@ -568,7 +589,7 @@ formatter's, including the 1 KB ones you never sized yourself.**
 Verified after the fix: six launcher clicks, thirteen samples with proper
 press/release bursts, zero faults.
 
-## Typing on a board with no keys (milestone K)
+## Typing on a board with no keys
 
 The CoreS3 has a touch panel and nothing else. Without a soft keyboard, every
 zapp that needs typing is a QEMU-only zapp and the hardware story quietly
@@ -601,8 +622,8 @@ into a text field raises it without a separate trip to the taskbar.
 keyboard and much worse with one thumb: every Ctrl+S would need three deliberate
 taps and leave the desktop in a modified state if the third missed.
 
-**On the board, not yet under a thumb.** The milestone-K image is flashed and
-boots clean:
+A clean boot on this board looks like this (captured when Notepad landed, so
+the zapp count is lower than today's):
 
 ```
 *** Booting Zephyr OS build e201b84b04e4 ***
@@ -610,7 +631,7 @@ mounted /SD:
 /SD:/system/zapps/notepad.llext already installed
 discovered 4 zapp(s)
 selftest: all checks passed
-selftest (wm): all checks passed          # 102 of 102, on Xtensa
+selftest (wm): all checks passed          # the full set, on Xtensa
 zephyr-desktop up on ili9342c@0
 touch device ft5336@38: ready
 ```
@@ -626,112 +647,95 @@ What is **not** yet measured is the part only a person can measure: whether a
 proposition from a 30 px menu row with dead space around it, and if it turns out
 not to be, it belongs in this section rather than being shipped quietly.
 
-## What has and has not run on hardware
+## What has run on this board
 
-**Confirmed on the device, end to end:** boot; the ili9342c display; the full
-selftest on Xtensa (51 checks at the time, 161 when milestone L was flashed);
-the FT6336 touch panel; the launcher opening on tap
-and listing the three discovered zapps; tapping `hello`, which reads the `.llext`
-off the filesystem, relocates an **Xtensa shared object** through the buffer
-loader into the Harvard instruction/data heaps, and draws
+Everything the desktop claims to do, by thumb, with zapps loaded off the card:
+boot; the ili9342c display; the FT6336 touch panel; the full boot selftest on
+Xtensa, including the checks that assert the chrome's hit rectangles do not
+overlap at `CONFIG_ZD_TOUCH_SLOP_PX=12`; the launcher listing zapps discovered
+on the card; loading one, which relocates an **Xtensa shared object** through
+the buffer loader into the Harvard instruction and data heaps; window management
+end to end — dragging a titlebar, minimise, restore from the taskbar, the corner
+grip, and closing through the decline handshake with the client slab returning to
+its starting count; a zapp reading and writing a real file on the card; and
+Minesweeper.
+
+Underneath all of it, the microSD card — through the pin arbiter, in a slot
+upstream considers unusable whenever the screen is on. A zapp here is a file you
+can pull out, read on a laptop and replace. And the 8 MB of PSRAM, holding
+LVGL's pool and rendering buffers, which gave 47 KB of DRAM back.
+
+### Four things that only fail on real hardware
+
+None of these can happen under QEMU, and each cost a session.
+
+**Windows would not drag.** Not a WM bug, a cost one: a move had started
+re-laying out the whole client subtree, the loop fell behind the FT5336's 20 ms
+poll, and the input queue overflowed. `<wrn> input: Event dropped, queue full`
+is the thing to watch for — it means the desktop loop is the bottleneck, not the
+driver.
+
+**Taskbar buttons could not be tapped.** They were 20 px tall at screen
+y 216..235 with no `ext_click_area` — deliberately, because adjacent controls
+cannot have one. Height was the only allowance available, so the window-list
+strip now runs flush to the bottom edge.
+
+**Touch targets scatter; they are not offset.** Two instrumented menu taps: one
+aimed at the middle of a 30 px row read 11 px low (y=173 in a row spanning
+148..177), the next read dead centre (y=162). An earlier single measurement had
+made this look like a systematic offset a calibration constant would remove. It
+is not. The consequence either way: **a 30 px row is about the smallest thing
+worth putting under a thumb, and anything at the bottom edge must reach y=239.**
+
+**The first boot after an ABI bump rewrites every zapp on the card.** The minor
+version lives in each manifest, so the seeder finds them all mismatched and
+reinstalls: tens of KB of writes plus verification reads, every one through the
+GPIO35 arbiter. Tapping during that overflows the input queue and looks exactly
+like the desktop being slow. It is one-time per flash; the second boot is reads
+only. Worth knowing before diagnosing it as something permanent.
+
+### Still unverified
+
+One thing, and it needs a deliberate try rather than a glance:
+
+**Hold-to-flag in Minesweeper.** 400 ms with a 10 px movement tolerance, so a
+thumb that rolls during the hold reads as a drag. There is no fallback gesture,
+because there is no second button. If it turns out not to work under a real
+thumb, the answer is a flag-mode toggle in the Game menu. (Discoverability is
+already handled — the zapp has a `Help -> How to Play` box, because the first
+person handed this build asked what "hold to flag" meant.)
+
+## Kconfig traps when porting
+
+Three ways a board configuration can be wrong while the build says nothing
+useful. All three have happened here, and `tools/ci-check.sh` now fails on the
+warning that catches the first two.
+
+**A symbol that does not exist on the target.** `CONFIG_LLEXT_HEAP_SIZE` is
+undefined on the Harvard ESP32-S3, so setting it globally in `prj.conf` did
+nothing here for a whole milestone — while this board ran out of exactly that
+heap. Kconfig warned on every single build. **A per-board Kconfig warning is a
+finding, not noise**, and the fix is to move the symbol into the fragments of
+the boards that have it rather than to learn to ignore the warning.
+
+**An assignment silently overridden by a `select`.** `CONFIG_FS_FATFS_MKFS=n`
+in a board fragment protected nothing: `FS_FATFS_MOUNT_MKFS` defaults to `y` and
+selects it, so the resolved `.config` still read `y` and a failed mount would
+have reformatted the card. The real control was the `FS_MOUNT_FLAG_NO_FORMAT`
+mount flag. **After setting a symbol that matters, read it back out of the
+resolved `.config`.**
+
+**The warning text wraps.** Both cases above produce the same sentence, and it
+breaks across two lines at about 100 columns:
 
 ```
-hello world, Zephyr!
+warning: LLEXT_HEAP_SIZE (defined at subsys/llext/Kconfig:91) was assigned the value '384' but got
+the value ''. Check these unsatisfied dependencies: (!HARVARD) (=n).
 ```
 
-in a retro window on a 320×240 touchscreen. That is the MVP success criterion on
-a second architecture, by touch.
+A grep for the whole phrase matches nothing. Match `was assigned the value`.
 
-...and the microSD card underneath all of it, through the pin arbiter, from a
-slot upstream considers unusable whenever the screen is on. A zapp on this board
-is a file you can pull out, read on a laptop and replace.
-
-...and the 8 MB of PSRAM, which now holds LVGL's pool and rendering buffers and
-gives 47 KB of DRAM back.
-
-...and, since ABI 0.3, a zapp writing to that card by touch. Tapping `Notes`
-appends a `note <n> at <uptime>ms` line to `/SD:/home/user/notes.txt` and
-immediately reads the file back to redraw the window, so the lines appearing on
-screen are the ones that reached the card, not an echo of what was typed.
-
-Every one of those calls borrows GPIO35 from the display and gives it back
-(`zd_bus_storage_acquire()` in `app/src/host/fs_api.c`), which is why the whole
-round trip works on a board where upstream's answer is to turn the screen off.
-The file survives a power cycle and is readable on a laptop.
-
-...and, since ABI 0.4, the whole of window management by thumb: dragging a
-titlebar, the minimise button, restoring from the taskbar button, the corner
-grip, and closing through the handshake — `[Notes] close requested; nothing
-unsaved` followed by a clean reap, with the client slab walking back to its
-starting count. 51 boot checks pass on the board too, including the ones that
-assert the chrome's hit rectangles do not overlap at
-`CONFIG_ZD_TOUCH_SLOP_PX=12`.
-
-Two of those did not work on the first try, and neither failure could occur on
-QEMU:
-
-- **Windows would not drag.** Not a WM bug — a cost one. See the `[J]` note in
-  `docs/design.md`: a move had started re-laying out the whole client subtree,
-  the loop fell behind the FT5336's 20 ms poll, and the input queue overflowed
-  with `<wrn> input: Event dropped, queue full`. The warning is the thing to
-  watch for; it means the desktop loop, not the driver, is the bottleneck.
-- **Taskbar buttons could not be tapped.** They were 20 px tall at screen
-  y 216..235 with no `ext_click_area` — deliberately, because adjacent controls
-  cannot have it — which is precisely the geometry that made the launcher button
-  unreachable back in the first touch session. Height was the only allowance
-  available, so the window-list strip now runs flush to the bottom edge of the
-  screen.
-
-**On the size of touch targets, honestly.** Two instrumented menu taps: one aimed
-at the middle of a 30 px row read 11 px low (y=173 in a row spanning 148..177),
-the next read dead centre (y=162). So this is scatter, not a constant offset a
-calibration constant would remove — an earlier session's single Start-button
-measurement made it look systematic and it is not. The practical consequence is
-the same either way: **a 30 px row is about the smallest thing worth putting
-under a thumb here, and anything at the very bottom edge of the panel needs to
-reach y=239.** Rows any smaller lose taps to the neighbour below.
-
-**Milestone M runs on the device.** Six zapps discovered off the card,
-Minesweeper among them, and the desktop responsive to touch.
-
-Getting there took one wrong turn worth recording, because the symptoms pointed
-somewhere else entirely: *"there seems to be a lag on the touch, and I don't see
-the new zapp."* Neither symptom was in milestone M's new code — nothing in it
-runs at all until a grid or a timer exists, and the zapp was missing from the
-launcher rather than failing to load. Both went away on a reflash with the
-resized heaps below. Two things had been true at once and only one of them was
-a bug:
-
-- **`CONFIG_LLEXT_HEAP_SIZE` does not exist on this board.** ESP32-S3 is
-  Harvard, so the heap is split into `LLEXT_INSTR_HEAP_SIZE` and
-  `LLEXT_DATA_HEAP_SIZE` — which means the 256 KB → 384 KB bump the sixth zapp
-  forced on ARM did *nothing* here, and this board's heaps were still sized for
-  the three small zapps that existed when they were written. Kconfig says so on
-  every build (`LLEXT_HEAP_SIZE was assigned the value '384' but got
-  (undefined)`) and it had been scrolling past unread. **A per-board Kconfig
-  warning is a finding, not noise.**
-- **The first boot after an ABI bump rewrites every zapp on the card.** The
-  minor version lives in each manifest, so `same_content()` finds all six
-  mismatched and reinstalls them: about 55 KB of writes plus 55 KB of
-  verification reads, every one of them through the GPIO35 arbiter. Tapping
-  during that will overflow the input queue. It is a one-time cost per flash and
-  the second boot is reads only — worth knowing before diagnosing it as
-  something permanent.
-
-Answered on the device since:
-
-- **The desktop comes up with no on-screen keyboard**, and the taskbar toggle
-  raises it. The boot checks had been leaving one up on this board since
-  milestone K; that is fixed, and confirmed by thumb rather than inferred.
-- **A 9x3 Minesweeper is useful on this panel.** The pessimistic reading in the
-  section above was wrong, and the zapp does not need to refuse to start on a
-  small screen.
-
-Still open, and the one that needs a deliberate try rather than a glance:
-
-- **Hold-to-flag.** 400 ms with a 10 px movement tolerance, and there is no
-  fallback gesture if a rolling thumb defeats it, because there is no second
-  button. It is also completely undiscoverable — the first person handed this
-  build asked what it meant — which is why Minesweeper now has a
-  `Help -> How to Play` box saying so. If the gesture itself turns out not to
-  work here, the fallback is a flag-mode toggle in the Game menu.
+**And one that is not Kconfig:** long filenames. FATFS without
+`CONFIG_FS_FATFS_LFN` is limited to 8.3, which truncates every `.llext` to
+`.LLE` and makes discovery find nothing. `CONFIG_FS_FATFS_MAX_LFN=64` is the
+working setting.

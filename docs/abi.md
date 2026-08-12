@@ -2,9 +2,26 @@
 
 The contract is `include/zd/zapp_abi.h`. This document explains the parts of it
 that a header comment cannot: why it is shaped this way, and what it does *not*
-promise.
+promise. If you are writing your first zapp, start with
+[writing-a-zapp.md](writing-a-zapp.md) and come back here for the rules.
 
-Current version: **0.7**.
+**Current ABI version: 0.7.** That is not the project's version, which is
+0.1.0 — the two count different things and move independently. The ABI number
+is what a compiled `.llext` is checked against at load, so it advances whenever
+the host gains a call, and it has been doing that since well before there was
+anything to release. Every "added in 0.4" note below is therefore about *which
+hosts have this*, not about which release you can download; a zapp declaring
+`abi_minor` 4 runs on a 0.7 host, and one declaring 7 is refused by a 0.4 host.
+
+| ABI | What arrived |
+|---|---|
+| 0.1 | Windows and labels |
+| 0.2 | `set_user_data()` / `get_user_data()` — instances of one zapp share `.bss` |
+| 0.3 | Storage: the permission shim, quotas, and a filesystem a zapp can reach |
+| 0.4 | Resize, minimise, and `ZD_EV_WINDOW_CLOSE_REQUEST` |
+| 0.5 | Keyboard input, text widgets, the clipboard, menu bars, dialogs, the clock |
+| 0.6 | Lists, `dialog_prompt()`, picker navigation, `zapp_launch()`, singleton enforcement |
+| 0.7 | Cell grids, timers, a ceiling on `window_set_geometry()`, `ZD_DLG_OK_ONLY` |
 
 ## Shape
 
@@ -154,17 +171,19 @@ which is `ZD_ZAPP_FLAG_WANTS_THREAD`, still reserved.
 
 ### What it does not enforce
 
-Everything in "What the MVP does not enforce" below still applies, unchanged.
+Everything in [What the desktop does not
+enforce](#what-the-desktop-does-not-enforce) below still applies, unchanged.
 The shim is the only *linkable* route to the filesystem, not the only possible
 one: with no MMU a loaded extension is trusted code in the kernel address space.
 Permissions here are advisory and filesystem-level. Saying otherwise would be
 the one genuinely dishonest thing this document could do.
 
 `zd_selftest_run()` asserts the refusals, the round trip, `-EBADF` on a closed
-handle, the kind and owner checks, the quota and the teardown at boot — fourteen
-checks, on every target, because the interesting failures are
-configuration-dependent. `zd_selftest_run_wm()` adds nineteen more once the
-window manager exists; together they are 51 checks in every image.
+handle, the kind and owner checks, the quota and the teardown — at boot, on
+every target, because the interesting failures are configuration-dependent.
+`zd_selftest_run_wm()` adds more once the window manager exists. Both print
+their results to the console at every boot, so the current count is whatever the
+last line of `selftest (wm):` says rather than a number written down here.
 
 ## Window state
 
@@ -460,7 +479,7 @@ stopwatch in the corner.
 Three, all provided by the desktop: a confirm box, a file picker that walks the
 filesystem through the session's permissions, and a one-line text prompt.
 
-**Both are asynchronous.** They return as soon as the dialog is up and the answer
+**All three are asynchronous.** They return as soon as the dialog is up and the answer
 arrives later as `ZD_EV_DIALOG`. There is no modal loop anywhere in this project
 and there is not going to be — the desktop thread runs LVGL, so blocking it to
 wait for a click would stop the thing being clicked from drawing.
@@ -562,13 +581,15 @@ by simply not calling it.
 extension is trusted code in the kernel address space and can reach any address
 it can compute. What the narrow surface buys is that the shim is the only
 *linkable* route, which is the difference between a contract and a suggestion.
-Real enforcement needs `CONFIG_USERSPACE` plus `llext_add_domain()` — reachable
-on both targets (`ARCH_HAS_USERSPACE if ARM_MMU` on arm64, `if ARM_MPU` on the
-RT1060's Cortex-M7) and deferred, not designed out. Every host-API entry point
+Real enforcement needs `CONFIG_USERSPACE` plus `llext_add_domain()`, which is
+reachable on the two ARM targets (`ARCH_HAS_USERSPACE if ARM_MMU` on arm64, `if
+ARM_MPU` on the RT1060's Cortex-M7) and deferred there rather than designed out.
+On the ESP32-S3 it has not been investigated, so treat it as unanswered rather
+than as either promised or ruled out. Every host-API entry point
 already carries a `zd_zapp_ctx_t`, so those calls become syscalls without a zapp
 changing a line.
 
-## What the MVP does not enforce
+## What the desktop does not enforce
 
 Stated plainly so nobody mistakes the shim for more than it is:
 
@@ -576,22 +597,34 @@ Stated plainly so nobody mistakes the shim for more than it is:
 - **Blocking.** A zapp that loops forever in a callback hangs the desktop. A
   watchdog that can kill a zapp needs the zapp to own a thread —
   `ZD_ZAPP_FLAG_WANTS_THREAD` is defined and reserved, not honoured.
-- **Refusing a close.** A zapp is now *asked* (0.4), and can flush, but it
-  cannot say no — see "Closing is an ask, not a veto" above. There is also no
-  way for it to put a "save changes?" prompt on screen: that needs a dialog and
-  a keyboard, and it has neither.
+- **Closing forever.** A zapp *can* decline a close with
+  `window_close_cancel()` — see [Closing is an ask you may decline, but not
+  ignore](#closing-is-an-ask-you-may-decline-but-not-ignore). What it cannot do
+  is ignore one: a zapp that neither answers nor cancels gets closed anyway when
+  the grace period expires. A zapp that *does* answer, with a dialog up, has the
+  grace period extended for as long as the dialog stands — so clicking the close
+  box a second time is the only force-quit there is. A real end-task, in the
+  taskbar where every other desktop puts one, is deferred.
 - **Storage quotas in bytes.** A zapp may fill the volume.
 
 ## Build
 
 Zapps live in `zapps/` — not `apps/`, to keep them distinct from Zephyr's
 convention where `app/` is the application source directory, which this project
-also has. They are built by the desktop's CMake but are separate ELF artifacts. One
-`west build` produces `zephyr.elf` and `hello.llext`.
+also has. They are built by the desktop's CMake but are separate ELF artifacts:
+one `west build` produces `zephyr.elf` and a `.llext` for every name in
+`ZD_ZAPP_NAMES`.
 
-ARM/ARM64 default to `LLEXT_TYPE_ELF_OBJECT`, which permits exactly **one source
-file per extension**. Lifting that means switching to
-`LLEXT_TYPE_ELF_RELOCATABLE`.
+**A zapp may be several source files.** ARM and ARM64 *default* to
+`LLEXT_TYPE_ELF_OBJECT`, which is one compiler invocation and therefore exactly
+one file, so both ARM board fragments select `LLEXT_TYPE_ELF_RELOCATABLE`
+instead; Xtensa defaults to `LLEXT_TYPE_ELF_SHAREDLIB`, which never had the
+restriction. `notepad` is four files and `files` is four. The one exception is
+deliberate: `hello` stays a single translation unit, so that the simplest
+possible zapp is still the simplest possible zapp.
+
+See [writing-a-zapp.md](writing-a-zapp.md) for the registration steps and the
+traps — chiefly that a zapp has no libc.
 
 > **Build correctness note.** On Zephyr `main` @ `e201b84b`, `add_llext_target`'s
 > packaging step does not re-run when a source changes: the `_debug.elf` command

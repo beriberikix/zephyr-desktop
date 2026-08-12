@@ -3,7 +3,9 @@
 A retro (Win95 / Mac System 7 era) desktop shell on Zephyr RTOS + LVGL, with zapps as
 dynamically loaded `llext` extensions discovered on a filesystem at runtime.
 
-The design doc and ordered task list is `docs/design.md`. Read it before doing anything.
+`docs/architecture.md` is how the desktop works and `docs/abi.md` is the app
+contract; read both before changing either. `docs/history.md` is the build log
+that milestone letters in comments point at -- provenance, not required reading.
 
 ## The MVP thesis
 
@@ -32,7 +34,7 @@ Two things are load-bearing and get real care. Everything else may be scrappy:
    first non-reactive thing in the ABI, missing since 0.1 and never noticed).
    **Pick the next zapp for being structurally unlike what the ABI already
    serves**, not for being the next obvious application; the two candidates
-   design.md had named would both have asked for one more widget.
+   history.md had named would both have asked for one more widget.
 
    The append-only rule covers `enum zd_event_type` and the `ZD_KEY_*` constants as
    well as the vtable. New values go on the *end*, never next to the ones they belong
@@ -67,10 +69,11 @@ with `CONFIG_LLEXT=y` and then fails every `llext_load()` at runtime. Do not rei
 it "just for iteration" — that forks the zapp model, which is the one thing this project
 must not do.
 
-Hardware targets, both building but not yet run on silicon:
+Hardware targets:
 
-- `mimxrt1060_evk/mimxrt1062/qspi` — headless (no panel yet), FAT on SD.
-  `CONFIG_LV_USE_PXP` is the eventual 2D-accel experiment.
+- `mimxrt1060_evk/mimxrt1062/qspi` — headless (no panel yet), FAT on SD, and
+  **never run on silicon**. `CONFIG_LV_USE_PXP` is the eventual 2D-accel
+  experiment.
 - `m5stack_cores3/esp32s3/procpu` — 320x240 touchscreen, microSD, the only
   **non-ARM** target, and the one that has actually run the whole MVP on
   silicon. Xtensa cannot stream zapps off the filesystem: it needs writable
@@ -130,7 +133,6 @@ This directory is both the west topdir and the project git repo.
 ## Build and run
 
 ```sh
-export ZEPHYR_SDK_INSTALL_DIR=~/zephyr-sdk-1.0.1     # matches zephyr/SDK_VERSION
 west build -b qemu_cortex_a53 app
 west build -t run                                     # opens a cocoa window
 ```

@@ -2,7 +2,7 @@
 
 Notable changes per release. The long form — including everything the plan got
 wrong and what the build taught us instead — is the milestone log in
-[docs/design.md](docs/design.md); this file is the short version, organised by
+[docs/history.md](docs/history.md); this file is the short version, organised by
 what changed rather than by what was learned.
 
 Versions are the *desktop's*. The **zapp ABI has its own number**, currently
@@ -11,6 +11,48 @@ against and is governed by the append-only rules in [docs/abi.md](docs/abi.md).
 
 ## Unreleased
 
+### Documentation, rewritten for someone who has never seen this before
+
+The docs were written for the author, while building. Three problems, all fixed:
+
+- **Passages that were actively wrong.** `docs/abi.md` told zapp authors they
+  could not decline a close and had neither dialogs nor a keyboard — all three
+  false since ABI 0.4/0.5 — and still documented the one-source-file-per-zapp
+  limit lifted two milestones ago, so a new author would have structured their
+  zapp around a constraint that no longer exists.
+- **No way in for a stranger.** Nothing in the repository said how to install
+  the prerequisites, and the README told you to export a path in the author's
+  home directory that CI had already proved unnecessary. Nothing documented
+  *using* the desktop at all.
+- **Shape and voice.** `docs/design.md` was three documents fused: an
+  architecture reference, a dated recon session addressed to one person, and an
+  850-line milestone log with `⏸ Requires the board` in it.
+
+New: [docs/using.md](docs/using.md) (the tour, including hold-to-flag, which was
+discoverable only through a Help menu), [docs/writing-a-zapp.md](docs/writing-a-zapp.md)
+(the four traps that build cleanly and fail at load), and
+[CONTRIBUTING.md](CONTRIBUTING.md).
+
+`docs/design.md` is split into [architecture.md](docs/architecture.md), which is
+evergreen and present-tense, and [history.md](docs/history.md), which keeps the
+build log and says plainly that nobody needs to read it. The README is a third
+shorter and leads with a screenshot.
+
+Two rules were applied throughout: **one canonical home per fact** — the story
+stays in the history, the fact moves to whichever doc owns its audience — and
+**no measured numbers in prose**, since the boot-check count alone appeared as
+51, 102, 160, 161 and 224 across three files.
+
+### Fixed
+
+- **`include/zd/zapp_abi.h` did not compile standalone.** It uses `bool` but
+  included only `<stddef.h>` and `<stdint.h>`, so the out-of-tree build its own
+  header comment promises would fail under `-std=c11`. It only worked in-tree
+  because Zephyr's toolchain flags pull `bool` in. Verified both ways now.
+- **`tools/serial_log.py` could not print `--help`** — an import guard ran at
+  module scope, and its failure message pointed at a Python interpreter inside
+  the author's personal tool install. `shot.py`, `zoom.py` and `serial_log.py`
+  now show their docstrings and document their flags.
 - The build-identity comment in `app/CMakeLists.txt` overstated what
   `CMAKE_CONFIGURE_DEPENDS` covers. Creating a tag touches neither `HEAD` nor
   the index, so an incremental build immediately after `git tag` keeps the

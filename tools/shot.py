@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
-"""Boot a build under QEMU, drive the pointer, and screenshot the framebuffer.
+r"""Boot a build under QEMU, drive the pointer, and screenshot the framebuffer.
 
-This is how milestones get verified. `west build -t run` opens a cocoa window a
-human has to look at; this drives the same binary headlessly over QMP, injects
-virtio-tablet events, and writes PNGs plus the serial console, so a change can be
-checked without a human in the loop.
+Use this one when the question is about pixels. `west build -t run` opens a cocoa
+window a human has to look at; this drives the same binary headlessly over QMP,
+injects virtio-tablet events, and writes PNGs plus the serial console.
+
+For questions about behaviour -- did the click land, what did the console say --
+use qemu-drive.py instead: it types, takes pixel coordinates rather than
+fractions, and asserts on console text.
 
     tools/shot.py -d build -o /tmp/out                       # just boot + shoot
     tools/shot.py -d build -o /tmp/out --click 0.5,0.5       # click centre, shoot
@@ -12,9 +15,10 @@ checked without a human in the loop.
         --shot boot --click 0.1,0.95 --shot menu \
         --drag 0.3,0.2:0.6,0.5 --shot dragged
 
-Actions run in order. Every --shot writes <name>.png and reports how many pixels
-changed since the previous shot, which is usually the assertion you actually
-want ("did clicking the launcher change anything?").
+Coordinates are fractions of the screen, 0..1. Actions run in the order given.
+Every --shot writes <name>.png and reports how many pixels changed since the
+previous shot, which is usually the assertion you actually want ("did clicking
+the launcher change anything?").
 
 SPDX-License-Identifier: Apache-2.0
 """
@@ -110,20 +114,27 @@ def point(text):
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("-d", "--build", default="build")
-    ap.add_argument("-o", "--out", required=True)
-    ap.add_argument("--boot-delay", type=float, default=6.0)
-    ap.add_argument("--port", type=int, default=4455)
-    ap.add_argument("--shot", action="append", default=[], dest="actions_shot")
-    ap.add_argument("--click", action="append", default=[], dest="actions_click")
-    ap.add_argument("--move", action="append", default=[], dest="actions_move")
-    ap.add_argument("--drag", action="append", default=[], dest="actions_drag")
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("-d", "--build", default="build", help="build directory (default build)")
+    ap.add_argument("-o", "--out", required=True, help="directory for PNGs and console.log")
+    ap.add_argument("--boot-delay", type=float, default=6.0,
+                    help="seconds to wait before the first action (default 6)")
+    ap.add_argument("--port", type=int, default=4455, help="QMP port (default 4455)")
+    ap.add_argument("--shot", action="append", default=[], dest="actions_shot",
+                    metavar="NAME", help="screenshot to <out>/NAME.png")
+    ap.add_argument("--click", action="append", default=[], dest="actions_click",
+                    metavar="X,Y", help="click at fractional coords 0..1")
+    ap.add_argument("--move", action="append", default=[], dest="actions_move",
+                    metavar="X,Y", help="move the pointer without clicking")
+    ap.add_argument("--drag", action="append", default=[], dest="actions_drag",
+                    metavar="X1,Y1:X2,Y2", help="press, move in steps, release")
     # press/release exist so a shot can be taken mid-gesture: pressed button
     # states and half-finished drags are only observable while held.
-    ap.add_argument("--press", action="append", default=[], dest="actions_press")
+    ap.add_argument("--press", action="append", default=[], dest="actions_press",
+                    metavar="X,Y", help="press and hold, so a shot can be taken mid-gesture")
     ap.add_argument("--release", action="append_const", const="",
-                    default=[], dest="actions_release")
+                    default=[], dest="actions_release", help="release a held button")
     args, _ = ap.parse_known_args()
 
     # Rebuild the action list in the order the flags actually appeared, which

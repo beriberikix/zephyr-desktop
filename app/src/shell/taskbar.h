@@ -11,7 +11,7 @@
 
 #include <lvgl.h>
 
-/** Called when the launcher button is released. NULL until milestone E. */
+/** Called when the launcher button is released. */
 typedef void (*zd_launcher_cb_t)(void *user_data);
 
 /**

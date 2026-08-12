@@ -13,7 +13,11 @@
 #include "../host/session.h"
 #include "../loader/zapp_loader.h"
 
-/** Invoked when a menu entry is chosen. Wired to the loader at milestone F. */
+/**
+ * Invoked when a menu entry is chosen.
+ *
+ * Wired to the loader since milestone F -- letters index docs/history.md.
+ */
 typedef void (*zd_launch_cb_t)(const struct zd_zapp_entry *entry, void *user_data);
 
 void zd_launcher_init(struct zd_layers *layers, const struct zd_session *session,

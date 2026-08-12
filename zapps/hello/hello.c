@@ -6,7 +6,11 @@
  * through the host API table handed to init().
  *
  * Note what is NOT here: no LVGL, no Zephyr headers, no knowledge of where its
- * window comes from or what draws it. That is the ABI doing its job.
+ * window comes from or what draws it. That is the ABI doing its job. Nor is
+ * there a libc -- strlen() and snprintf() are not there to link against. This
+ * file never needs one; anything bigger links zapps/lib. See
+ * docs/writing-a-zapp.md, which walks through copying this into a zapp of your
+ * own, including the two lines of app/CMakeLists.txt that build it.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -40,11 +44,17 @@ static int hello_init(zd_zapp_ctx_t ctx, const struct zd_host_api *api)
 		return -1; /* the loader checks this too; belt and braces */
 	}
 
-	/* A zapp does not actually need to import anything -- init() is handed
-	 * the table. This call exists to exercise the other direction anyway:
-	 * it forces the loader to resolve a symbol out of the desktop's export
-	 * table at link time, so a broken EXPORT_GROUP_SYMBOL fails loudly here
-	 * rather than silently the first time some later zapp depends on it.
+	/* DO NOT COPY THIS INTO YOUR ZAPP. It is not part of the pattern.
+	 *
+	 * A zapp needs to import nothing at all: init() is handed the table. The
+	 * call exists here, in the one zapp that is everybody's starting point,
+	 * to exercise the other direction anyway -- it forces the loader to
+	 * resolve a symbol out of the desktop's export table at link time, so a
+	 * broken EXPORT_GROUP_SYMBOL fails loudly in hello rather than silently
+	 * in whichever later zapp first depends on it.
+	 *
+	 * Your zapp should use `api` and import nothing, which is what makes
+	 * `nm -u` on it come back empty.
 	 */
 	if (zd_get_host_api() == NULL) {
 		return -1;
@@ -80,6 +90,11 @@ static void hello_event(zd_zapp_ctx_t ctx, const struct zd_event *ev)
 	/* Cross-check the event against our own recorded handle. With two
 	 * instances sharing this code, getting this wrong is how one instance
 	 * ends up retitling the other's window.
+	 *
+	 * Safe here because every event hello asks for belongs to a window. It
+	 * does not generalise: ZD_EV_TIMER arrives with ev->win == NULL and this
+	 * guard would swallow it. A zapp that starts a timer must switch on
+	 * ev->type first and only then compare the window.
 	 */
 	if (ev->win != mine) {
 		return;

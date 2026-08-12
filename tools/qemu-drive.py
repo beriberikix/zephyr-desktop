@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """Run a built image in QEMU with no window, and drive it.
 
-`west build -t run` opens a cocoa window and offers no way in but a hand. That
-makes every check that needs input a manual one, which is how milestone J came
-to hand-test a stale binary twice. This runs the same image headless, captures
-the console, and clicks and types at it through QEMU's QMP socket -- so
-"launch Notes, drag its grip, open the File menu, choose Save" is a script.
+`west build -t run` opens a cocoa window and offers no way in but a hand, which
+makes every check that needs input a manual one -- and a manual check is one
+nobody notices they ran against the previous binary. This runs the same image
+headless, captures the console, and clicks and types at it through QEMU's QMP
+socket, so "launch Notes, drag its grip, open the File menu, choose Save" is a
+script. For questions about pixels rather than console output, use shot.py.
 
     tools/qemu-drive.py -d build-smoke -t 12
     tools/qemu-drive.py -d build 'wait:2' 'click:20,258' 'wait:1' 'click:30,200'

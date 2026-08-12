@@ -7,6 +7,13 @@ and stacks multiple inputs vertically so before/after states sit side by side.
 
     tools/zoom.py -o out.png -r 0,240,80,32 -z 6 boot.png pressed.png
 
+INPUT MUST BE A shot.py PNG: 8-bit RGB with filter 0 on every row. The reader
+here is about thirty lines and understands nothing else -- not RGBA, not
+palettes, not the adaptive row filters every general-purpose encoder emits. A
+screenshot from your operating system will be rejected rather than mangled. To
+crop one of those, `sips -c H W --cropOffset Y X in.png --out out.png` is
+already on any Mac.
+
 SPDX-License-Identifier: Apache-2.0
 """
 import argparse
@@ -56,7 +63,8 @@ def write_png(path, w, h, rows):
 
 
 def main():
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("inputs", nargs="+")
     ap.add_argument("-o", "--out", required=True)
     ap.add_argument("-r", "--rect", required=True, help="x,y,w,h in source pixels")

@@ -4,7 +4,7 @@
  * Split across four files because it can be: the ARM targets moved to
  * LLEXT_TYPE_ELF_RELOCATABLE in milestone K, and this is the first zapp that
  * would have been unpleasant as one translation unit. That is not an accident
- * of taste -- design.md's risk #6 named the text editor as the thing that would
+ * of taste -- the design doc's risk #6 named the text editor as the thing that would
  * hit the one-file wall, and it did.
  *
  * SPDX-License-Identifier: Apache-2.0

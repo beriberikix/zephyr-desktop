@@ -2,10 +2,22 @@
  * zephyr-desktop — the zapp ABI.
  *
  * This header is the contract between the desktop and every extension. It
- * deliberately includes no Zephyr and no LVGL headers, only <stdint.h> and
- * <stddef.h>. That is what keeps LVGL's ABI from silently becoming ours, and
+ * deliberately includes no Zephyr and no LVGL headers, only the three freestanding
+ * C headers below. That is what keeps LVGL's ABI from silently becoming ours, and
  * what would let a zapp be linked statically behind the same contract if a
  * non-llext-capable target ever mattered again.
+ *
+ * START HERE, if you are writing one:
+ *
+ *   1. zapps/hello/hello.c   -- the whole of a working zapp, in one file
+ *   2. docs/writing-a-zapp.md -- build it, register it, and the traps
+ *   3. docs/abi.md           -- the rules, and what this ABI does NOT promise
+ *
+ * THERE IS NO LIBC. The desktop exports one symbol, so strlen(), memcpy() and
+ * snprintf() are not there to link against -- and neither is the memset() the
+ * compiler synthesises for you out of an ordinary struct assignment. That
+ * builds cleanly and fails at load. zapps/lib/zapplib.h has replacements and
+ * explains the whole trap; docs/writing-a-zapp.md has the one-line check.
  *
  * Versioning rule: abi_major must match exactly; zapp.abi_minor <= host.abi_minor
  * is accepted. The host vtable only ever grows by appending, and struct_size
@@ -18,6 +30,7 @@
 #ifndef ZD_ZAPP_ABI_H_
 #define ZD_ZAPP_ABI_H_
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -25,6 +38,16 @@
 extern "C" {
 #endif
 
+/*
+ * The ABI's version, which is NOT the project's.
+ *
+ * zephyr-desktop is at 0.1.0; the ABI below is at 0.7. They count different
+ * things: this pair is what a compiled .llext is checked against at load, so it
+ * advanced once per feature long before there was a release to name. The
+ * "delivered as of 0.5"-style notes throughout this file therefore mean "hosts
+ * from 0.5 onward have this", not "coming in a future release" -- everything
+ * here works today. See docs/abi.md for the table.
+ */
 #define ZD_ABI_MAJOR 0
 #define ZD_ABI_MINOR 7
 
@@ -551,6 +574,13 @@ _Static_assert(offsetof(struct zd_event, click) == offsetof(struct zd_event, gri
 struct zd_window_desc {
 	const char *title;
 	struct zd_rect geom; /**< w or h of 0 means "desktop picks and cascades" */
+	/**
+	 * Reserved. Pass 0.
+	 *
+	 * No ZD_WIN_FLAG_* values are defined; the field exists so that window
+	 * properties can arrive without changing the size of this struct, which
+	 * a zapp allocates and the desktop reads through a pointer.
+	 */
 	uint32_t flags;
 };
 
@@ -599,10 +629,34 @@ struct zd_host_api {
 	int (*label_set_text)(zd_zapp_ctx_t ctx, zd_label_t label, const char *text);
 
 	/* filesystem -- always ctx-scoped, never raw paths */
+
+	/**
+	 * Write the absolute path of one of the session's directories into @p out.
+	 *
+	 * The first call any zapp that touches storage has to make: there are no
+	 * absolute paths in this ABI that a zapp is expected to know, because the
+	 * roots differ per board (/RAM: under QEMU, /SD: on a card) and per
+	 * session. Build every path you use by resolving a directory and
+	 * appending to it.
+	 *
+	 * @return 0, -EINVAL for an unknown @p dir, or -ENOSPC if @p out_len is
+	 *         too small -- never a truncated path, which would name the wrong
+	 *         file just as confidently as the right one.
+	 */
 	int (*path_resolve)(zd_zapp_ctx_t ctx, enum zd_dir dir, char *out, uint32_t out_len);
 
 	/* misc */
+
+	/**
+	 * Write a line to the desktop's console, prefixed with the zapp's name.
+	 *
+	 * @p level is reserved and currently ignored -- everything is logged at
+	 * the same severity. Pass 0. It is in the signature so that severities
+	 * can arrive later without a vtable change.
+	 */
 	void (*log)(zd_zapp_ctx_t ctx, int level, const char *msg);
+
+	/** Milliseconds since boot. The only clock a zapp can trust; see clock_now(). */
 	int64_t (*uptime_ms)(void);
 
 	/**
@@ -656,11 +710,19 @@ struct zd_host_api {
 	 * Every open handle is closed for you when your instance is unloaded, but
 	 * quotas are small: close what you finish with.
 	 */
+	/**
+	 * Open @p path, which must be absolute and under a permitted root.
+	 *
+	 * @p flags is a ZD_O_* set. @return 0 with a handle in @p out, or a
+	 * negative errno -- -EACCES for a path outside the session's roots or a
+	 * write to a read-only one, -ENOSPC when the open-file quota is full.
+	 */
 	int (*fs_open)(zd_zapp_ctx_t ctx, const char *path, uint32_t flags, zd_file_t *out);
 	/** @return bytes read, 0 at end of file, or a negative errno. */
 	int (*fs_read)(zd_zapp_ctx_t ctx, zd_file_t file, void *buf, uint32_t len);
 	/** @return bytes written, or a negative errno. */
 	int (*fs_write)(zd_zapp_ctx_t ctx, zd_file_t file, const void *buf, uint32_t len);
+	/** @p whence takes ZD_SEEK_*. @return 0 or a negative errno. */
 	int (*fs_seek)(zd_zapp_ctx_t ctx, zd_file_t file, int32_t offset, int whence);
 	/** @return the current offset, or a negative errno. */
 	int (*fs_tell)(zd_zapp_ctx_t ctx, zd_file_t file);
@@ -928,6 +990,9 @@ struct zd_host_api {
 	 *
 	 * Row ids are yours; the desktop only hands them back. A list belongs
 	 * to the window it was created in and dies with it.
+	 *
+	 * @p flags is reserved -- pass 0. Multi-select is the intended first
+	 * occupant, which is why the parameter is here rather than added later.
 	 */
 	zd_list_t (*list_create)(zd_zapp_ctx_t ctx, zd_window_t win,
 				 const struct zd_rect *geom, uint32_t flags);
@@ -1200,7 +1265,8 @@ struct zd_host_api {
  * it has focus before it had recorded the handle it was just handed, and could
  * not tell its own window from another instance's.
  *
- * ZD_ZAPP_FLAG_WANTS_THREAD is defined but not honoured in the MVP. Zapps are
+ * ZD_ZAPP_FLAG_WANTS_THREAD is defined and not honoured -- the only flag here in
+ * that state. Zapps are
  * callback-driven on the desktop thread, because hello world needs no thread
  * and thread-per-zapp is where the ABI gets genuinely hard: locking discipline,
  * priorities, and teardown of a thread that may be blocked. When it arrives the
@@ -1213,7 +1279,7 @@ struct zd_zapp_manifest {
 	uint16_t abi_minor;
 	uint32_t flags;
 	const char *name;
-	const char *icon; /**< NULL in the MVP */
+	const char *icon; /**< Reserved; pass NULL. There are no zapp icons yet. */
 
 	int (*init)(zd_zapp_ctx_t ctx, const struct zd_host_api *api);
 	void (*event)(zd_zapp_ctx_t ctx, const struct zd_event *ev);

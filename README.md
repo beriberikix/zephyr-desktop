@@ -2,201 +2,111 @@
 
 [![build](https://github.com/beriberikix/zephyr-desktop/actions/workflows/build.yml/badge.svg)](https://github.com/beriberikix/zephyr-desktop/actions/workflows/build.yml)
 
-A retro desktop shell on [Zephyr RTOS](https://zephyrproject.org) + [LVGL](https://lvgl.io):
-overlapping draggable windows with hand-built Win95-era chrome, a taskbar with a
-launcher and clock, and **zapps as `.llext` extensions discovered on a filesystem
-and loaded at runtime**.
+A retro desktop shell on [Zephyr RTOS](https://zephyrproject.org) +
+[LVGL](https://lvgl.io). Overlapping draggable windows with hand-built Win95-era
+chrome, a taskbar with a launcher and a clock, and **apps as `.llext` extensions
+discovered on a filesystem and loaded at runtime** — not linked into the image.
 
-It runs on `qemu_cortex_a53` — natively on macOS, in a real window, with a real
-mouse — and builds for the MIMXRT1060-EVK and the M5Stack CoreS3.
+![The desktop running under QEMU on macOS, with Minesweeper open](docs/images/desktop.png)
 
-```
-+--------------------------------------------------+
-| +--------------------------+                     |
-| | Hello (active)       [X] |                     |
-| +--------------------------+  <- drawn by a 3 KB |
-| | hello world, Zephyr!     |     .llext loaded   |
-| |                          |     at runtime      |
-| +--------------------------+                     |
-|                                                  |
-| [ Start ]                               [ 9:41 ] |
-+--------------------------------------------------+
-```
+It runs on `qemu_cortex_a53`, natively on macOS in a real window with a real
+mouse, and it runs on an M5Stack CoreS3 — a 320×240 touchscreen you can hold.
 
-## Status
+## Try it
 
-Five zapps, a zapp ABI at 0.7 that has only ever grown by appending, and 224
-assertions that run at every boot.
-
-The spine everything hangs off came first, and still holds: boot to a retro
-desktop; the launcher enumerates zapps found on the filesystem; clicking one
-loads its `.llext` at runtime; the zapp calls into the desktop API to create a
-window and draw "hello world, Zephyr!"; two instances can be open, dragged over
-each other with correct z-order and focus; closing one unloads the extension
-cleanly with no leaks. Verified over 20 consecutive launch/close cycles: 20
-loads, 20 unloads, zero errors, and after every one — 0 windows live, 8 slab
-blocks free, 0 zapps live, 0 handles live.
-
-Since then the ABI has grown one zapp at a time. It now ships a **text editor**
-(typing, selection, clipboard, menus, dialogs), a **file browser** that
-navigates the filesystem and hands a `.txt` to the editor, and
-**Minesweeper** — which was the useful one, because it is the only zapp so far
-that is not an application. It asked for a way to draw something the desktop
-will never have a widget for, and for the ability to do anything at all without
-being clicked. Both had been missing and neither had been noticed.
-
-It also runs **on hardware**: the whole criterion above, by touch, on an
-**M5Stack CoreS3** — 320×240 touchscreen, Xtensa rather than ARM, zapps loaded
-off a microSD card. Getting the card working meant arbitrating GPIO35, which
-this board wires to both SPI MISO and the LCD's D/C line; upstream's own answer
-is to disable the display. The `mimxrt1060_evk` builds (368 KB flash, headless)
-but has not been run on silicon. See [docs/hardware.md](docs/hardware.md).
-
-## Quick start
-
-Requires the Zephyr SDK and `west`. On macOS, QEMU's `cocoa` display backend
-does the rest — no VM, no X server.
+You need Python 3, CMake, Ninja and `dtc` — on macOS,
+`brew install cmake ninja dtc` — plus `pip install west`. Then:
 
 ```sh
 git clone https://github.com/beriberikix/zephyr-desktop
 cd zephyr-desktop
-west init -l manifest
-west update
-export ZEPHYR_SDK_INSTALL_DIR=~/zephyr-sdk-1.0.1
-west build -b qemu_cortex_a53 app
-west build -t run          # opens a window; click Start
+west init -l manifest       # this repo is the workspace; west.yml is in manifest/
+west update                 # clones Zephyr and the modules into ./zephyr, ./modules
+west packages pip --install
 ```
 
-To verify a change without a human looking at a window, `tools/qemu-drive.py`
-runs the same image headless and clicks and types at it over QMP, then asserts
-on the console:
+Then the **Zephyr SDK**, whose version is pinned in `zephyr/SDK_VERSION` (this
+release wants 1.0.1). Download the matching release from
+[sdk-ng](https://github.com/zephyrproject-rtos/sdk-ng/releases), unpack it, and
+run its `setup.sh` — that registers it where CMake looks, so you do not need to
+set `ZEPHYR_SDK_INSTALL_DIR`. The SDK also supplies the QEMU that runs it.
 
 ```sh
-python3 tools/qemu-drive.py -d build \
-    'wait:3' 'click:20,258' 'expect:discovered 6 zapp(s)'
+west build -b qemu_cortex_a53 app
+west build -t run
 ```
 
-It exits non-zero if an `expect:` never matched or QEMU died early, so it chains
-from a shell. When the question is about pixels rather than log lines,
-`tools/shot.py` screenshots the framebuffer and reports how many pixels changed
-between shots, and `tools/zoom.py` magnifies a region — two one-pixel bevel
-rings cannot be judged at 1:1.
+A window opens. Click **Start**.
 
-## Writing a zapp
+Everything is in that menu: a text editor, a file browser, Minesweeper, and two
+toy apps. One entry, `badabi`, is *supposed* to refuse to launch — it declares
+an unsupported ABI version, and exists so the version gate gets exercised for
+real. [docs/using.md](docs/using.md) is the tour, including the one gesture you
+will not guess: **hold** a Minesweeper square to flag it.
 
-A zapp is one C file that includes exactly one header and links against
-essentially nothing:
+## What makes it interesting
 
-```c
-#include <zephyr/llext/symbol.h>
-#include <zd/zapp_abi.h>
+**Apps are loaded at runtime, from a filesystem.** The launcher enumerates
+`.llext` files it finds on disk; clicking one relocates and loads it, and
+closing its last window unloads it again. Delete one from the card and drop your
+own in — the desktop has no compiled-in list of apps. Writing one is
+[about forty lines](zapps/hello/hello.c).
 
-static int hello_init(zd_zapp_ctx_t ctx, const struct zd_host_api *api)
-{
-        struct zd_window_desc desc = { .title = "Hello" };
-        zd_window_t win = api->window_create(ctx, &desc);
+**The ABI is a vtable, not a symbol pile.** The desktop exports exactly **one**
+symbol where Zephyr's defaults would export 172. Apps get opaque,
+generation-counted handles validated against their owner and never touch LVGL,
+so the permission shim is the only linkable route to the filesystem.
 
-        api->label_create(ctx, win, "hello world, Zephyr!", 8, 8);
-        api->set_user_data(ctx, (void *)win);
-        return 0;
-}
+**Nothing is destroyed during dispatch.** An app closing its own window is
+running on a stack frame inside code that unloading would free. Every destroy is
+queued and drained from the main loop. It is the rule the whole design bends
+around, and [docs/architecture.md](docs/architecture.md) explains why.
 
-struct zd_zapp_manifest zd_zapp_manifest = {
-        .magic = ZD_ZAPP_MAGIC,
-        .abi_major = ZD_ABI_MAJOR,
-        .abi_minor = ZD_ABI_MINOR,
-        .name = "Hello",
-        .init = hello_init,
-};
-LL_EXTENSION_SYMBOL(zd_zapp_manifest);
-```
+## Limits worth knowing before you start
 
-No LVGL, no Zephyr, no idea where its window comes from or what draws it. Drop
-it in `zapps/<name>/<name>.c`, add the name to `ZD_ZAPP_NAMES` and its files to
-`ZD_<name>_SOURCES` in `app/CMakeLists.txt`, and it builds as a separate
-`.llext` artifact. Anything larger than `hello` also links `zapps/lib`, because
-a zapp has no libc: `strlen` is out, and so is the `memset` the compiler
-synthesises from an ordinary struct assignment.
+- **Permissions are advisory.** With no MMU, a loaded extension is trusted code
+  in the kernel address space. The filesystem shim is a contract, not a security
+  boundary. Hardening via `CONFIG_USERSPACE` is deferred, not designed out.
+- **Apps are callback-driven and single-threaded.** One that loops forever in a
+  callback hangs the desktop.
+- **Windows resize from the bottom-right corner only.** No maximise, no
+  snapping, no notifications, no sound, no theming engine, one hardcoded palette.
+- **The clock is a fiction** on boards with no RTC, and there is no date in the
+  ABI at all.
 
-(`zapps/`, not `apps/`: Zephyr's convention is that `app/` holds the application
-source, and this project has one. A sibling `apps/` reads as a typo for it every
-single time.)
+Also: Zephyr is pinned to a `main` commit rather than a release, because the
+QEMU display and pointer stack this needs is in no release tag yet; and
+`native_sim` is not a target and cannot be, because it cannot load extensions.
+Both are explained in [docs/architecture.md](docs/architecture.md).
 
-Read [docs/abi.md](docs/abi.md) before writing a second one — particularly the
-part about instances of one zapp sharing `.bss`.
+## Hardware
 
-## How it works
+| Board | State |
+|---|---|
+| `qemu_cortex_a53` | The development target. Graphical, pointer-driven, runs on macOS with no VM. |
+| `m5stack_cores3/esp32s3/procpu` | **Runs on silicon.** 320×240 touch, Xtensa, apps loaded off a microSD card. |
+| `mimxrt1060_evk/mimxrt1062/qspi` | Builds, headless, never run on hardware. |
 
-```
-manifest/west.yml   the Zephyr pin (a main commit, deliberately — see below)
-include/zd/         the zapp ABI. No Zephyr and no LVGL headers may appear here.
-app/                the desktop image
-  src/wm/           client struct, stacking, focus, drag/resize, handle registry
-  src/chrome/       retro bevels, titlebar, palette, menus, row lists, cell grids
-  src/shell/        background, taskbar, launcher, clock, window list, dialogs,
-                    on-screen keyboard
-  src/host/         host-API vtable, fs shim, session, storage, clipboard, and
-                    the handle layer over each widget kind — text, list, grid
-  src/loader/       llext discover/load/instance/unload, boot seeding
-  src/input/        the one funnel every key enters through, and the US keymap
-zapps/              hello, notes, notepad, files, mines (not apps/ -- see below)
-                    ...and badabi, which exists only to be refused
-tools/              headless drive, screenshot and zoom harnesses
-```
-
-Three ideas carry most of the weight:
-
-**The WM is a tiny X11 stacking WM.** A `zd_client` per window, one
-`sys_dlist_t` for z-order that is *authoritative* — LVGL's child order is a
-projection re-applied from it — and one central dispatch path where every frame
-carries a single callback and every child bubbles to it.
-
-**Nothing is destroyed during dispatch.** A zapp closing its own window is
-running on a stack frame inside text that unloading would free. Window close and
-instance unload are queued and completed from the desktop loop, guarded by a
-callback-depth counter.
-
-**The ABI is a vtable, not a symbol pile.** The desktop exports one symbol; zapps
-get opaque, generation-counted handles validated against their owner. That keeps
-the symbol surface at **1** (Zephyr's defaults would export 172), so the
-permission shim is the only linkable route to the filesystem.
-
-## Honest limits
-
-- **Permissions are advisory.** Without an MMU a loaded `.llext` is trusted code
-  in the kernel address space. The fs shim is a contract, not a security
-  boundary. `CONFIG_USERSPACE` + `llext_add_domain()` is the hardening path and
-  is reachable on both targets — deferred, not designed out.
-- **Zapps are callback-driven**, single-threaded. `ZD_ZAPP_FLAG_WANTS_THREAD` is
-  reserved, not honoured — it is the last flag in the header that is defined and
-  does nothing, and the terminal is the zapp that will force it.
-- **Windows resize from the bottom-right grip only.** No maximise, no snapping,
-  no resize from any other edge. No notifications, no sound, no theming engine
-  (one hardcoded palette), no real multi-user login, no hardware acceleration
-  yet.
-- **`clock_now()` reports the desktop's own fiction** on boards with no RTC, and
-  there is no date in the ABI at all. That is why Notepad has no Time/Date: a
-  made-up time in a corner of the taskbar is a nicety, and the same number
-  written into a document the user then saves is a small lie with a long life.
-- **Zephyr is pinned to a `main` commit, not a release.** The `qemu_cortex_a53`
-  display and pointer stack landed 2026-06-15, after the v4.4.1 tag. No release
-  contains it.
-- **Xtensa cannot stream zapps off the filesystem.** It requires writable llext
-  storage, which requires a `peek()`-capable loader, and `llext_fs_loader` has
-  none — so the CoreS3 reads each zapp into RAM first. Discovery is unchanged.
-- **`native_sim` is not a target and cannot be.** `arch/posix/` has no `elf.c`
-  and `arch_elf_relocate*` are weak stubs returning `-ENOTSUP`, so it builds
-  happily with `CONFIG_LLEXT=y` and then fails every `llext_load()` at runtime.
+[docs/hardware.md](docs/hardware.md) has the runbooks — including how to
+reproduce the CoreS3's screen geometry under QEMU when you do not have one.
 
 ## Documentation
 
 | | |
 |---|---|
-| [CHANGELOG.md](CHANGELOG.md) | What changed per release, and what the desktop's version number means next to the ABI's |
-| [docs/design.md](docs/design.md) | The design doc and milestone log, including everything the build taught us that the plan got wrong |
-| [docs/abi.md](docs/abi.md) | The zapp ABI: versioning, ordering guarantees, handles, the symbol surface |
-| [docs/hardware.md](docs/hardware.md) | Hardware runbooks: MIMXRT1060-EVK and M5Stack CoreS3 |
-| [CLAUDE.md](CLAUDE.md) | Orientation and the rules that are easy to get wrong |
+| [docs/using.md](docs/using.md) | The tour: windows, the apps, and the gestures |
+| [docs/writing-a-zapp.md](docs/writing-a-zapp.md) | Build your own, and the four traps |
+| [docs/abi.md](docs/abi.md) | The app ABI: versioning, handles, ordering, what it refuses to promise |
+| [docs/architecture.md](docs/architecture.md) | How the desktop works inside |
+| [docs/hardware.md](docs/hardware.md) | Board runbooks and porting |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Building, testing, and the rules that are easy to get wrong |
+| [CHANGELOG.md](CHANGELOG.md) | What changed per release |
+| [docs/history.md](docs/history.md) | How it was built, and what the plan got wrong. Not required reading. |
+
+("zapp" is what this project calls an app, and `zapps/` is where they live —
+Zephyr's convention is that `app/` holds the application source, and this
+project has one of those too. A sibling `apps/` reads as a typo for it every
+single time.)
 
 ## Licence
 
