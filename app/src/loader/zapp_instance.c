@@ -417,6 +417,23 @@ void zd_zapp_on_client_resized(struct zd_client *client, int16_t w, int16_t h)
 	zd_zapp_dispatch(inst, &ev);
 }
 
+void zd_zapp_on_client_key(struct zd_client *client, uint32_t code, uint32_t unicode,
+			   uint16_t mods)
+{
+	struct zd_zapp_instance *inst = client->owner;
+	struct zd_event ev = {
+		.type = ZD_EV_KEY,
+		.win = (zd_window_t)client->handle,
+		.key = { .code = code, .unicode = unicode, .mods = mods },
+	};
+
+	if (inst == NULL || client->handle == 0) {
+		return; /* desktop-internal window */
+	}
+
+	zd_zapp_dispatch(inst, &ev);
+}
+
 void zd_zapp_on_client_minimized(struct zd_client *client, bool minimized)
 {
 	struct zd_zapp_instance *inst = client->owner;

@@ -1,5 +1,30 @@
 cmake_minimum_required(VERSION 3.20.0)
 
+# --- QEMU devices -------------------------------------------------------------
+#
+# A keyboard, which the board does not ask for: Zephyr's own support for
+# qemu_cortex_a53 only needs a pointer, so its board.cmake stops at a
+# virtio-tablet on bus 3. The same virtio input driver handles keys, so one more
+# device is the whole of it. The bus index must match the virtio_mmio4 node in
+# boards/qemu_cortex_a53.overlay, which is the transport at 0xa000800.
+#
+# This has to be here, ABOVE find_package(Zephyr), and it has to be a CMake
+# variable. Two routes that look better and are not:
+#
+#   - list(APPEND QEMU_EXTRA_FLAGS ...) further down this file never arrives.
+#     cmake/emu/qemu.cmake is included from zephyr/CMakeLists.txt during
+#     find_package(), so the run target is fully assembled before the
+#     application's own body is read.
+#   - CONFIG_QEMU_EXTRA_FLAGS in the board fragment reaches qemu.cmake, but the
+#     value contains "bus=", and scripts/build/llext_inspect_discarded_groups.py
+#     parses .config with line.split("=") and no maxsplit. The build then dies
+#     in a post-link step with "ValueError: too many values to unpack".
+#     Upstream bug at Zephyr main e201b84b; any CONFIG_ string holding a second
+#     '=' trips it.
+if(BOARD STREQUAL "qemu_cortex_a53")
+  list(APPEND QEMU_EXTRA_FLAGS -device virtio-keyboard-device,bus=virtio-mmio-bus.4)
+endif()
+
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(zephyr_desktop LANGUAGES C)
 
@@ -26,7 +51,10 @@ target_sources(app PRIVATE
   src/host/host_api.c
   src/loader/zapp_loader.c
   src/loader/zapp_instance.c
+  src/input/keys.c
+  src/input/keymap.c
   src/wm/wm.c
+  src/wm/keys.c
   src/wm/client.c
   src/wm/stack.c
   src/wm/focus.c

@@ -16,6 +16,32 @@
  * mimxrt1060_evk this node is replaced by the board's zephyr,sdmmc-disk and
  * nothing above the mount table changes.
  */
+/*
+ * A second virtio input device, for keys.
+ *
+ * The board gives us virtio_mmio3 with a tablet on it, which is a pointer and
+ * nothing else. input_virtio.c forwards INPUT_EV_KEY generically, so a
+ * virtio-keyboard on the next free transport arrives at the same driver and
+ * shows up in the input subsystem as ordinary Linux key codes -- see
+ * app/src/input/keymap.c, which is the only code that cares.
+ *
+ * No `display` property here, unlike virtio_input0: that exists to scale
+ * absolute pointer coordinates to the panel, and a keyboard has none.
+ *
+ * The matching `-device virtio-keyboard-device,bus=virtio-mmio-bus.4` is added
+ * in app/CMakeLists.txt. Bus index and node must agree -- QEMU numbers the
+ * mmio transports from the same base this devicetree does, so bus.4 is the node
+ * at 0xa000800.
+ */
+&virtio_mmio4 {
+	status = "okay";
+
+	virtio_input1: virtio-input {
+		compatible = "virtio,input";
+		status = "okay";
+	};
+};
+
 / {
 	ramdisk0: ramdisk0 {
 		compatible = "zephyr,ram-disk";

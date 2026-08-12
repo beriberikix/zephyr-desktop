@@ -161,6 +161,22 @@ struct zd_wm {
 	/* Called when a client was minimised or restored. */
 	void (*on_client_minimized)(struct zd_client *client, bool minimized);
 
+	/* Called with a key press for the focused client, once the routing in
+	 * wm/keys.c has decided the zapp is the right recipient.
+	 */
+	void (*on_client_key)(struct zd_client *client, uint32_t code, uint32_t unicode,
+			      uint16_t mods);
+
+	/* Offered a key press BEFORE on_client_key, so a focused text widget
+	 * can swallow ordinary typing. Returning true means "consumed"; the
+	 * zapp is then not told, exactly as it is not told about the pointer
+	 * samples during a titlebar drag.
+	 *
+	 * Never called with CTRL held: an accelerator must beat the caret.
+	 */
+	bool (*on_client_text_key)(struct zd_client *client, uint32_t code, uint32_t unicode,
+				   uint16_t mods);
+
 	/* Called when the user asks to close a window, so the owner can ask the
 	 * zapp first. Returning false means "nobody could answer, close it now".
 	 */
@@ -268,6 +284,16 @@ void zd_wm_raise(struct zd_wm *wm, struct zd_client *client);
  * directly if you want every client rather than every visible one.
  */
 struct zd_client *zd_wm_top(struct zd_wm *wm);
+
+/* --- keys (keys.c) --- */
+
+/**
+ * @brief Route one key press.
+ *
+ * Called from the single input funnel in input/keys.h, whichever source it came
+ * from. The policy is documented at the top of wm/keys.c.
+ */
+void zd_wm_key(struct zd_wm *wm, uint32_t code, uint32_t unicode, uint16_t mods);
 
 /* --- focus and dispatch (focus.c) --- */
 

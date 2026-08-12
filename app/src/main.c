@@ -15,6 +15,7 @@
 #include <lvgl_zephyr.h>
 
 #include "chrome/theme.h"
+#include "input/keys.h"
 #include "host/session.h"
 #include "host/storage.h"
 #include "loader/zapp_instance.h"
@@ -111,7 +112,9 @@ int main(void)
 	wm.on_client_click = zd_zapp_on_client_click;
 	wm.on_client_resized = zd_zapp_on_client_resized;
 	wm.on_client_minimized = zd_zapp_on_client_minimized;
+	wm.on_client_key = zd_zapp_on_client_key;
 	wm.on_client_close_request = zd_zapp_on_client_close_request;
+	zd_keys_init(&wm);
 	zd_tasklist_init(layers.panel, &wm);
 	wm.on_client_list_changed = zd_tasklist_invalidate;
 	zd_zapp_loader_init(&wm, &session);

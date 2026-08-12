@@ -75,6 +75,8 @@ void zd_zapp_on_client_focus(struct zd_client *client, bool focused);
 void zd_zapp_on_client_click(struct zd_client *client, int16_t x, int16_t y);
 void zd_zapp_on_client_resized(struct zd_client *client, int16_t w, int16_t h);
 void zd_zapp_on_client_minimized(struct zd_client *client, bool minimized);
+void zd_zapp_on_client_key(struct zd_client *client, uint32_t code, uint32_t unicode,
+			   uint16_t mods);
 
 /**
  * @brief Ask a window's zapp to close itself.

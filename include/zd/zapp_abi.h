@@ -26,7 +26,7 @@ extern "C" {
 #endif
 
 #define ZD_ABI_MAJOR 0
-#define ZD_ABI_MINOR 4
+#define ZD_ABI_MINOR 5
 
 /** Longest absolute path the desktop will hand back or accept. */
 #define ZD_PATH_MAX 96
@@ -113,6 +113,50 @@ struct zd_dirent {
 #define ZD_SEEK_CUR 1
 #define ZD_SEEK_END 2
 
+/* --- keys ------------------------------------------------------------------ */
+
+/*
+ * Key codes, in the desktop's own namespace.
+ *
+ * Not Linux input codes and not LVGL's LV_KEY_*, for the same reason ZD_O_READ
+ * is not FS_O_READ: this header may include no Zephyr and no LVGL header, and a
+ * zapp built out of tree against nothing but the ABI must still compile. The
+ * desktop maps whatever its input sources produce onto these.
+ *
+ * APPEND ONLY, like the event enum -- a zapp compares against the numbers it
+ * was compiled with. Spelled as #defines with explicit values rather than an
+ * enum so that is impossible to miss.
+ *
+ * Anything that produces a character arrives as ZD_KEY_CHAR with the codepoint
+ * in ev->key.unicode. Everything else is a named key with unicode == 0. Enter,
+ * Tab and Backspace are named rather than characters because an editor treats
+ * them as commands far more often than as text.
+ */
+#define ZD_KEY_CHAR      1  /**< see ev->key.unicode */
+#define ZD_KEY_BACKSPACE 2
+#define ZD_KEY_TAB       3
+#define ZD_KEY_ENTER     4
+#define ZD_KEY_ESCAPE    5
+#define ZD_KEY_DELETE    6
+#define ZD_KEY_LEFT      7
+#define ZD_KEY_RIGHT     8
+#define ZD_KEY_UP        9
+#define ZD_KEY_DOWN      10
+#define ZD_KEY_HOME      11
+#define ZD_KEY_END       12
+#define ZD_KEY_PAGE_UP   13
+#define ZD_KEY_PAGE_DOWN 14
+#define ZD_KEY_INSERT    15
+#define ZD_KEY_F1        16 /**< F1..F12 are consecutive; see ZD_KEY_F() */
+#define ZD_KEY_F12       27
+
+/** F1 is ZD_KEY_F(1). Out-of-range @p n is the caller's problem. */
+#define ZD_KEY_F(n) (ZD_KEY_F1 + (n) - 1)
+
+#define ZD_MOD_SHIFT (1u << 0)
+#define ZD_MOD_CTRL  (1u << 1)
+#define ZD_MOD_ALT   (1u << 2)
+
 /* --- events --------------------------------------------------------------- */
 
 /*
@@ -143,7 +187,22 @@ enum zd_event_type {
 	 * the close box are the desktop's business and are not delivered.
 	 */
 	ZD_EV_CLICK,
-	ZD_EV_KEY,   /**< reserved; not delivered in the MVP */
+	/**
+	 * A key was pressed in this window. Delivered since 0.5; reserved and
+	 * silent before that.
+	 *
+	 * Presses only -- releases are not delivered, because nothing an
+	 * application does needs them and they double the traffic through a
+	 * dispatch path that runs on the desktop thread. Auto-repeat, when it
+	 * arrives, will look like more presses.
+	 *
+	 * Which keys reach you depends on what has the caret. If the window has
+	 * a focused text widget, ordinary typing goes into it and never appears
+	 * here; a key held with CTRL always comes here instead, so accelerators
+	 * work while the user is typing. A window with no text widget gets
+	 * everything.
+	 */
+	ZD_EV_KEY,
 
 	/* --- ABI 0.4 ------------------------------------------------------ */
 
@@ -176,19 +235,46 @@ struct zd_event {
 			int16_t x;
 			int16_t y;
 		} click;
+		/**
+		 * ZD_EV_KEY. @a code is a ZD_KEY_* value; @a unicode is the
+		 * codepoint when @a code is ZD_KEY_CHAR and 0 otherwise; @a
+		 * mods is a mask of ZD_MOD_*.
+		 *
+		 * Widened in 0.5 from a lone `code`, which is why the two new
+		 * fields are after it rather than in a tidier order.
+		 */
 		struct {
 			uint32_t code;
+			uint32_t unicode;
+			uint16_t mods;
 		} key;
-		/** New content-area size for ZD_EV_RESIZED. Added in 0.4; the
-		 * union was already 4 bytes wide, so struct zd_event did not
-		 * change size and no zapp needs rebuilding.
-		 */
+		/** New content-area size for ZD_EV_RESIZED. Added in 0.4. */
 		struct {
 			int16_t w;
 			int16_t h;
 		} resize;
 	};
 };
+
+/*
+ * What actually has to hold for an older zapp to keep working.
+ *
+ * The union may grow -- a wider member makes struct zd_event bigger, and that
+ * is harmless, because a zapp only ever reads the event through a pointer the
+ * desktop handed it and only ever reads members it was compiled to know about.
+ * What may NOT change is where anything already there lives. These assertions
+ * are the rule; sizeof deliberately is not asserted, because pinning it would
+ * forbid exactly the growth that is safe.
+ */
+_Static_assert(offsetof(struct zd_event, type) == 0, "zd_event.type moved");
+_Static_assert(offsetof(struct zd_event, win) == sizeof(void *),
+	       "zd_event.win moved");
+_Static_assert(offsetof(struct zd_event, click) == 2 * sizeof(void *),
+	       "the zd_event union moved");
+_Static_assert(offsetof(struct zd_event, click) == offsetof(struct zd_event, key) &&
+		       offsetof(struct zd_event, click) ==
+			       offsetof(struct zd_event, resize),
+	       "a zd_event union member is not at the union's offset");
 
 struct zd_window_desc {
 	const char *title;
