@@ -21,7 +21,9 @@
 #include "host_api.h"
 #include "session.h"
 #include "text_api.h"
+#include "../chrome/menu.h"
 #include "../loader/zapp_instance.h"
+#include "../wm/client.h"
 #include "../wm/handle.h"
 #include "../wm/wm.h"
 
@@ -322,6 +324,72 @@ static int api_text_delete_selection(zd_zapp_ctx_t ctx, zd_text_t text)
 	return inst != NULL ? zd_text_delete_selection(inst, (uintptr_t)text) : -EINVAL;
 }
 
+/* --- menus -------------------------------------------------------------------- */
+
+static zd_menu_t api_menubar_create(zd_zapp_ctx_t ctx, zd_window_t win)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+	struct zd_client *client = window_of(ctx, win);
+
+	if (inst == NULL || client == NULL) {
+		return NULL;
+	}
+
+	return (zd_menu_t)zd_menubar_create(inst, client);
+}
+
+static zd_menu_t api_menu_add_submenu(zd_zapp_ctx_t ctx, zd_menu_t bar, const char *label)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	if (inst == NULL) {
+		return NULL;
+	}
+
+	return (zd_menu_t)zd_menu_add_submenu(inst, (uintptr_t)bar, label);
+}
+
+static int api_menu_add_item(zd_zapp_ctx_t ctx, zd_menu_t menu, const char *label,
+			     uint16_t id)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_menu_add_item(inst, (uintptr_t)menu, label, id) : -EINVAL;
+}
+
+static int api_menu_add_separator(zd_zapp_ctx_t ctx, zd_menu_t menu)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_menu_add_separator(inst, (uintptr_t)menu) : -EINVAL;
+}
+
+static int api_menu_set_item_enabled(zd_zapp_ctx_t ctx, zd_menu_t menu, uint16_t id,
+				     bool enabled)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_menu_set_item_enabled(inst, (uintptr_t)menu, id, enabled)
+			    : -EINVAL;
+}
+
+static int api_window_get_content_size(zd_zapp_ctx_t ctx, zd_window_t win, int16_t *w,
+				       int16_t *h)
+{
+	struct zd_client *client = window_of(ctx, win);
+
+	if (client == NULL || w == NULL || h == NULL) {
+		return -EINVAL;
+	}
+
+	/* Derived from client->geom, never read back off LVGL: the model is the
+	 * truth, and reading back is how ZD_EV_RESIZED came to carry the old
+	 * size in milestone J.
+	 */
+	zd_client_content_size(client, w, h);
+	return 0;
+}
+
 /* --- clipboard --------------------------------------------------------------- */
 
 static int api_clipboard_set(zd_zapp_ctx_t ctx, const char *text, uint32_t len)
@@ -578,7 +646,12 @@ static void *api_unsafe_lvgl_content(zd_zapp_ctx_t ctx, zd_window_t win)
 	.text_delete_selection = api_text_delete_selection,                                 \
 	.clipboard_set = api_clipboard_set, .clipboard_get = api_clipboard_get,             \
 	.clipboard_length = api_clipboard_length, .text_cut = api_text_cut,                 \
-	.text_copy = api_text_copy, .text_paste = api_text_paste
+	.text_copy = api_text_copy, .text_paste = api_text_paste,                           \
+	.menubar_create = api_menubar_create,                                               \
+	.menu_add_submenu = api_menu_add_submenu, .menu_add_item = api_menu_add_item,       \
+	.menu_add_separator = api_menu_add_separator,                                       \
+	.menu_set_item_enabled = api_menu_set_item_enabled,                                 \
+	.window_get_content_size = api_window_get_content_size
 
 static const struct zd_host_api host_api_untrusted = {
 	ZD_HOST_API_COMMON,

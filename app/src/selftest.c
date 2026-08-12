@@ -22,11 +22,13 @@
 #include <zd/zapp_abi.h>
 
 #include "selftest.h"
+#include "chrome/menu.h"
 #include "host/clipboard.h"
 #include "host/fs_api.h"
 #include "host/fs_shim.h"
 #include "host/storage.h"
 #include "host/text_api.h"
+#include "wm/client.h"
 #include "wm/handle.h"
 #include "wm/wm.h"
 
@@ -523,6 +525,85 @@ static void test_text(struct zd_wm *wm)
 	      "and releases every handle the window held");
 }
 
+/*
+ * Menu bars: the geometry, the bookkeeping, and the thing that has bitten this
+ * project three times.
+ *
+ * The overlap check runs on the target rather than in a test directory for the
+ * usual reason -- the value that breaks it, CONFIG_ZD_TOUCH_SLOP_PX, lives in a
+ * board fragment, so a desktop that is fine on QEMU and unusable by thumb is
+ * exactly the failure this catches.
+ */
+static void test_menu(struct zd_wm *wm)
+{
+	struct zd_zapp_instance *mine = (struct zd_zapp_instance *)0xa2;
+	struct zd_client *client;
+	lv_area_t want = { .x1 = 4, .y1 = 4, .x2 = 4 + 220 - 1, .y2 = 4 + 140 - 1 };
+	uint32_t before = zd_handle_live_count();
+	uintptr_t bar;
+	uintptr_t file;
+	uintptr_t edit;
+	lv_area_t a;
+	lv_area_t b;
+	int16_t w0;
+	int16_t h0;
+	int16_t w1;
+	int16_t h1;
+
+	client = zd_wm_window_create(wm, "selftest menu", &want);
+	if (client == NULL) {
+		check(false, "a window for the menu checks could be created");
+		return;
+	}
+
+	zd_client_content_size(client, &w0, &h0);
+
+	bar = zd_menubar_create(mine, client);
+	check(bar != 0, "a window can be given a menu bar");
+	check(zd_menubar_create(mine, client) == 0, "but only one");
+
+	zd_client_content_size(client, &w1, &h1);
+	check(w1 == w0 && h1 == h0 - ZD_MENUBAR_H,
+	      "the content area gives up exactly the bar's height");
+
+	file = zd_menu_add_submenu(mine, bar, "File");
+	edit = zd_menu_add_submenu(mine, bar, "Edit");
+	check(file != 0 && edit != 0, "drop-downs can be added to the bar");
+	check(file != edit, "and are distinct");
+
+	lv_obj_update_layout(client->frame);
+	check(zd_menu_title_coords(bar, 0, &a) && zd_menu_title_coords(bar, 1, &b),
+	      "the bar reports its title rectangles");
+	check(a.x2 < b.x1, "adjacent menu titles do not overlap");
+	check(lv_area_get_height(&a) >= ZD_MENUBAR_H - 1,
+	      "a menu title is as tall as the bar");
+
+	check(zd_menu_add_item(mine, file, "Open", 1) == 0, "an item can be added");
+	check(zd_menu_add_separator(mine, file) == 0, "and a separator");
+	check(zd_menu_add_item(mine, file, "Exit", 2) == 0, "and another item");
+	check(zd_menu_add_item(mine, bar, "wrong", 3) == -EINVAL,
+	      "items cannot be added to the bar itself");
+
+	check(zd_menu_set_item_enabled(mine, file, 2, false) == 0,
+	      "an item can be disabled by id");
+	check(zd_menu_set_item_enabled(mine, file, 99, false) == -ENOENT,
+	      "and an id that is not there says so");
+
+	while (zd_menu_add_item(mine, edit, "x", 0) == 0) {
+		/* fill it */
+	}
+	check(zd_menu_add_item(mine, edit, "x", 0) == -EINVAL,
+	      "a full drop-down refuses more items");
+
+	check(zd_menu_live_count() == 3, "one bar and two drop-downs are live");
+
+	zd_wm_window_close(client);
+	zd_wm_reap(wm);
+	check(zd_menu_live_count() == 0,
+	      "closing the window releases the bar and every drop-down on it");
+	check(zd_handle_live_count() == before, "and every handle they held");
+}
+
 void zd_selftest_run(const struct zd_session *session)
 {
 	failures = 0;
@@ -544,6 +625,7 @@ void zd_selftest_run_wm(struct zd_wm *wm)
 
 	test_wm(wm);
 	test_text(wm);
+	test_menu(wm);
 
 	if (failures == 0) {
 		LOG_INF("selftest (wm): all checks passed");

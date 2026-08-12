@@ -40,6 +40,7 @@ target_sources(app PRIVATE
   src/main.c
   src/chrome/theme.c
   src/chrome/titlebar.c
+  src/chrome/menu.c
   src/shell/desktop.c
   src/shell/taskbar.c
   src/shell/launcher.c

@@ -14,6 +14,7 @@
 #include <lvgl.h>
 #include <lvgl_zephyr.h>
 
+#include "chrome/menu.h"
 #include "chrome/theme.h"
 #include "input/keys.h"
 #include "host/session.h"
@@ -123,6 +124,7 @@ int main(void)
 	zd_zapp_loader_init(&wm, &session);
 	zd_launcher_init(&layers, &session, on_app_chosen, &wm);
 	zd_osk_init(&layers);
+	zd_menu_init(&layers);
 	zd_selftest_run_wm(&wm);
 	zd_smoke_init(&wm, &session);
 	lvgl_unlock();
@@ -153,6 +155,12 @@ int main(void)
 		 * that are about to disappear.
 		 */
 		zd_tasklist_reap();
+		/* And the dismissed menu, for the same reason as both of the
+		 * above: choosing File -> Exit fires an event the zapp answers
+		 * by closing its window, from a stack frame standing on the
+		 * menu row that was clicked.
+		 */
+		zd_menu_reap();
 
 		/* After the reaps, for the same reason the taskbar rebuild is:
 		 * it launches and closes windows, which must never happen from

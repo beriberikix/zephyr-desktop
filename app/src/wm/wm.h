@@ -41,6 +41,8 @@
 #define ZD_TITLEBAR_H  (ZD_BTN_SZ + 4)
 #define ZD_CONTENT_GAP 2 /**< titlebar to content */
 #define ZD_GRIP_SZ     (12 + CONFIG_ZD_TOUCH_SLOP_PX) /**< resize grip, bottom-right */
+/** Menu bar, when a window has one. Titles sit edge to edge, so this grows. */
+#define ZD_MENUBAR_H   (14 + CONFIG_ZD_TOUCH_SLOP_PX)
 
 /* Wide enough for both buttons plus something of a title. */
 #define ZD_WIN_MIN_W (ZD_FRAME_PAD * 2 + 2 * ZD_BTN_SZ + 40)
@@ -86,6 +88,16 @@ struct zd_client {
 	lv_obj_t *close_btn;
 	lv_obj_t *content; /**< the app's area */
 	lv_obj_t *grip;    /**< resize handle */
+
+	/**
+	 * Menu bar, or NULL. Created on demand by chrome/menu.c, owned by the
+	 * subtree, and subtracted from the content area -- which is why the
+	 * height is cached here rather than read back off the object: it is
+	 * needed by zd_client_content_size(), which is the one place the model
+	 * is allowed to tell LVGL what the geometry is.
+	 */
+	lv_obj_t *menubar;
+	int16_t menubar_h;
 
 	/**
 	 * The text widget with the caret in this window, or NULL.

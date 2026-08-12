@@ -56,6 +56,29 @@ config ZD_TEXT_MAX
 	  the zapp is told when a file will not fit, rather than the document
 	  being silently truncated.
 
+config ZD_MAX_MENUS
+	int "Maximum simultaneously live menu bars and drop-downs, desktop-wide"
+	default 16
+	help
+	  Counts bars and drop-downs together: a window with File and Edit uses
+	  three. Fixed array, same reasoning as windows and open files.
+
+config ZD_MENU_MAX_SUBMENUS
+	int "Maximum drop-downs on one menu bar"
+	default 5
+	help
+	  Bounded by the panel, not by taste. Five titles at touch sizing is
+	  already most of a 320 px bar, and a title pushed off the end cannot be
+	  reached at all.
+
+config ZD_MENU_MAX_ITEMS
+	int "Maximum items in one drop-down, separators included"
+	default 12
+	help
+	  Notepad's File menu is five items and a separator. Twelve leaves room
+	  without making the record large -- each item carries its own label,
+	  because a menu outlives the string the zapp built it from.
+
 config ZD_CLIPBOARD_MAX
 	int "Largest thing the clipboard will hold (bytes)"
 	default 2048

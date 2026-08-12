@@ -51,7 +51,7 @@ void zd_client_content_size(const struct zd_client *client, int16_t *w, int16_t 
 {
 	*w = (int16_t)(lv_area_get_width(&client->geom) - 2 * ZD_FRAME_PAD);
 	*h = (int16_t)(lv_area_get_height(&client->geom) - 2 * ZD_FRAME_PAD - ZD_TITLEBAR_H -
-		       ZD_CONTENT_GAP);
+		       ZD_CONTENT_GAP - client->menubar_h);
 }
 
 static void layout_subtree(struct zd_client *client)
@@ -79,10 +79,20 @@ static void layout_subtree(struct zd_client *client)
 	lv_obj_set_pos(client->min_btn, inner_w - 2 * ZD_BTN_SZ - 4, btn_y);
 	lv_obj_set_pos(client->close_btn, inner_w - ZD_BTN_SZ - 2, btn_y);
 
+	/* The menu bar, if this window has one, sits between the titlebar and
+	 * the content and pushes the content down by its own height. A window
+	 * without one has menubar_h == 0 and is laid out exactly as before.
+	 */
+	if (client->menubar != NULL) {
+		lv_obj_set_size(client->menubar, inner_w, client->menubar_h);
+		lv_obj_set_pos(client->menubar, ZD_FRAME_PAD,
+			       ZD_FRAME_PAD + ZD_TITLEBAR_H + ZD_CONTENT_GAP);
+	}
+
 	zd_client_content_size(client, &content_w, &content_h);
 	lv_obj_set_size(client->content, content_w, content_h);
 	lv_obj_set_pos(client->content, ZD_FRAME_PAD,
-		       ZD_FRAME_PAD + ZD_TITLEBAR_H + ZD_CONTENT_GAP);
+		       ZD_FRAME_PAD + ZD_TITLEBAR_H + ZD_CONTENT_GAP + client->menubar_h);
 
 	lv_obj_set_pos(client->grip, w - ZD_FRAME_PAD - ZD_GRIP_SZ,
 		       h - ZD_FRAME_PAD - ZD_GRIP_SZ);
@@ -156,6 +166,11 @@ void zd_client_destroy_widgets(struct zd_client *client)
 	client->close_btn = NULL;
 	client->content = NULL;
 	client->grip = NULL;
+	client->text_focus = NULL;
+	/* menubar and menubar_h are cleared by chrome/menu.c's DELETE handler,
+	 * which fires while the subtree above is being torn down -- it has more
+	 * to release than a pointer and must not be second-guessed here.
+	 */
 }
 
 void zd_client_apply_pos(struct zd_client *client)

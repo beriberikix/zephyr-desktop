@@ -53,6 +53,8 @@ typedef struct zd_window *zd_window_t;
 typedef struct zd_label *zd_label_t;
 /** An editable multi-line text field. Added in 0.5. */
 typedef struct zd_text *zd_text_t;
+/** A menu bar, or one drop-down within it. Added in 0.5. */
+typedef struct zd_menu *zd_menu_t;
 /** An open file. */
 typedef struct zd_file *zd_file_t;
 /**
@@ -247,6 +249,14 @@ enum zd_event_type {
 	 * wants it to mean.
 	 */
 	ZD_EV_TEXT_CHANGED,
+	/**
+	 * A menu item was chosen; ev->menu.id is the value you gave it.
+	 *
+	 * Delivered after the drop-down has been dismissed, so closing your own
+	 * window from here is safe -- and is exactly what File -> Exit should
+	 * do.
+	 */
+	ZD_EV_MENU,
 };
 
 struct zd_event {
@@ -279,6 +289,10 @@ struct zd_event {
 		struct {
 			zd_text_t text;
 		} text;
+		/** ZD_EV_MENU. Added in 0.5. */
+		struct {
+			uint16_t id;
+		} menu;
 	};
 };
 
@@ -524,6 +538,46 @@ struct zd_host_api {
 	int (*text_cut)(zd_zapp_ctx_t ctx, zd_text_t text);
 	int (*text_copy)(zd_zapp_ctx_t ctx, zd_text_t text);
 	int (*text_paste)(zd_zapp_ctx_t ctx, zd_text_t text);
+
+	/* --- ABI 0.5: menus ------------------------------------------------ */
+
+	/*
+	 * The desktop draws the menu; you say what is in it and are told which
+	 * item was chosen. A menu is chrome -- it has to match the palette, it
+	 * has to behave the same in every application, and on a touch panel it
+	 * has to be sized by rules a zapp has no way to know.
+	 *
+	 * The bar lives inside your window, above your content area, and the
+	 * content area shrinks to make room. Your coordinates do not move: they
+	 * were always relative to the content area, which is now shorter. Adding
+	 * a bar therefore delivers ZD_EV_RESIZED, so widgets laid out before it
+	 * can be fixed up.
+	 *
+	 * Command ids are yours; the desktop only hands them back.
+	 */
+	zd_menu_t (*menubar_create)(zd_zapp_ctx_t ctx, zd_window_t win);
+	zd_menu_t (*menu_add_submenu)(zd_zapp_ctx_t ctx, zd_menu_t bar, const char *label);
+	int (*menu_add_item)(zd_zapp_ctx_t ctx, zd_menu_t menu, const char *label,
+			     uint16_t id);
+	int (*menu_add_separator)(zd_zapp_ctx_t ctx, zd_menu_t menu);
+	/** A disabled item is drawn greyed and cannot be chosen. */
+	int (*menu_set_item_enabled)(zd_zapp_ctx_t ctx, zd_menu_t menu, uint16_t id,
+				     bool enabled);
+
+	/* --- ABI 0.5: window content size ---------------------------------- */
+
+	/**
+	 * The usable area inside a window, in the coordinates your widgets use.
+	 *
+	 * window_get_geometry() reports the OUTER rectangle, which includes the
+	 * chrome -- and a zapp is deliberately not told how thick the chrome is,
+	 * because that is the desktop's business and changes with the target's
+	 * touch slop. Before 0.5 the only way to learn the content size was to
+	 * wait for the first ZD_EV_RESIZED and guess until then; notes.c still
+	 * carries the comment. This is the answer.
+	 */
+	int (*window_get_content_size)(zd_zapp_ctx_t ctx, zd_window_t win, int16_t *w,
+				       int16_t *h);
 };
 
 /* --- the zapp's side ------------------------------------------------------- */
