@@ -57,6 +57,7 @@ int zd_text_get_text(struct zd_zapp_instance *owner, uintptr_t handle, uint32_t 
 		     char *buf, uint32_t len);
 
 int zd_text_get_length(struct zd_zapp_instance *owner, uintptr_t handle);
+int zd_text_get_capacity(struct zd_zapp_instance *owner, uintptr_t handle);
 int zd_text_insert(struct zd_zapp_instance *owner, uintptr_t handle, const char *s);
 int zd_text_set_geometry(struct zd_zapp_instance *owner, uintptr_t handle,
 			 const struct zd_rect *geom);

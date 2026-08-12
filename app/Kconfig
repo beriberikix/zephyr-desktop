@@ -43,6 +43,20 @@ config ZD_TASKLIST_BTN_MAX_W
 	  the right one; a row that refused to shrink would instead push windows
 	  off the end of the strip where they cannot be reached at all.
 
+config ZD_KEY_QUEUE_LEN
+	int "Key presses buffered between the input thread and the desktop loop"
+	default 16
+	help
+	  A key arrives on Zephyr's input thread; everything it goes on to touch
+	  belongs to LVGL and may only be touched from the desktop loop. So keys
+	  are queued, exactly as LVGL's own pointer driver queues pointer
+	  samples.
+
+	  Overflowing drops the key and logs it. Blocking would stall the input
+	  thread behind a UI that is not drawing, and growing would turn a stuck
+	  desktop into an out-of-memory one. Sixteen is several seconds of fast
+	  typing at a 30 ms loop.
+
 config ZD_TEXT_MAX
 	int "Largest document a text widget will hold (bytes)"
 	default 4096

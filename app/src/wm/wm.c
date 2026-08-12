@@ -103,6 +103,11 @@ void zd_wm_window_set_title(struct zd_client *client, const char *title)
 	strncpy(client->title, title != NULL ? title : "", ZD_TITLE_MAX - 1);
 	client->title[ZD_TITLE_MAX - 1] = '\0';
 	lv_label_set_text(client->title_label, client->title);
+	/* Traced because a title is often the only externally visible sign that
+	 * a zapp noticed something -- Notepad's modified marker is the whole of
+	 * its dirty state as far as a headless run can tell.
+	 */
+	LOG_DBG("window %u retitled '%s'", client->id, client->title);
 	zd_wm_notify_list_changed(client->wm);
 }
 
@@ -233,6 +238,18 @@ void zd_wm_window_restore(struct zd_client *client)
 	LOG_DBG("window %u '%s' restored", client->id, client->title);
 }
 
+void zd_wm_window_close_cancel(struct zd_client *client)
+{
+	if (!client->close_requested || client->pending_destroy) {
+		return;
+	}
+
+	LOG_DBG("window %u '%s': its zapp declined the close", client->id, client->title);
+
+	client->close_requested = false;
+	client->close_deadline = 0;
+}
+
 void zd_wm_window_close_request(struct zd_client *client)
 {
 	struct zd_wm *wm = client->wm;
@@ -310,6 +327,25 @@ static void sweep_close_deadlines(struct zd_wm *wm)
 
 	SYS_DLIST_FOR_EACH_CONTAINER_SAFE(&wm->stack, client, next, node) {
 		if (!client->close_requested || now < client->close_deadline) {
+			continue;
+		}
+
+		/*
+		 * A zapp that is asking the user is not a zapp that is ignoring
+		 * us, and the grace period exists only to catch the second one.
+		 * "The text has changed -- save it?" is exactly the right answer
+		 * to a close request and takes a person several seconds, so the
+		 * deadline is pushed out rather than fired while a dialog this
+		 * client's owner asked for is on screen.
+		 *
+		 * This cannot become a way to hold a window hostage: the dialog
+		 * is drawn by the desktop, always has a Cancel, and the user can
+		 * dismiss it and click the close box again -- which is the force
+		 * quit, because the second request never defers.
+		 */
+		if (wm->on_client_close_stalled != NULL &&
+		    wm->on_client_close_stalled(client)) {
+			client->close_deadline = now + CONFIG_ZD_CLOSE_GRACE_MS;
 			continue;
 		}
 

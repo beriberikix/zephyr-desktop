@@ -74,4 +74,7 @@ bool zd_dialog_key(uint32_t code, uint32_t unicode, uint16_t mods);
 /** Is one up? */
 bool zd_dialog_open(void);
 
+/** Is one up, asked for by @p inst? */
+bool zd_dialog_open_for(const struct zd_zapp_instance *inst);
+
 #endif /* ZD_SHELL_DIALOG_H_ */

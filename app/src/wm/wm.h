@@ -17,9 +17,13 @@
 
 #include <lvgl.h>
 
+#include <zd/zapp_abi.h>
+
 #include "../shell/desktop.h"
 
-#define ZD_TITLE_MAX 32
+/* ZD_TITLE_MAX comes from the ABI: a zapp has to be able to build a title, so
+ * the bound belongs in the contract rather than being the WM's private secret.
+ */
 
 /*
  * Chrome geometry, in pixels.
@@ -212,6 +216,13 @@ struct zd_wm {
 	 */
 	bool (*on_client_close_request)(struct zd_client *client);
 
+	/* Asked when a close request's grace period runs out, just before the
+	 * window is taken anyway. Returning true means the zapp is visibly
+	 * asking the user rather than ignoring the desktop, and buys it
+	 * another grace period.
+	 */
+	bool (*on_client_close_stalled)(struct zd_client *client);
+
 	/* Called whenever the set of windows, or anything the shell displays
 	 * about them, changed: created, closed, retitled, minimised, focused.
 	 *
@@ -269,11 +280,27 @@ void zd_wm_window_restore(struct zd_client *client);
  * form of zd_wm_window_close(): the owning zapp gets a ZD_EV_WINDOW_CLOSE_REQUEST
  * and a bounded grace period in which to flush and close itself.
  *
- * It is an ask, not a veto. A window with no owner, a second request for the
- * same window, or a grace period that expires all close immediately. A zapp
- * cannot make itself unclosable by ignoring the event.
+ * A window with no owner, a second request while one is outstanding, or a grace
+ * period that expires all close immediately: a zapp cannot keep its window by
+ * IGNORING the event. It can keep it by answering -- see
+ * zd_wm_window_close_cancel().
  */
 void zd_wm_window_close_request(struct zd_client *client);
+
+/**
+ * @brief The owning zapp has declined this close.
+ *
+ * Clears the outstanding request and its deadline, so the window stays and the
+ * user's next click starts the conversation over from the beginning.
+ *
+ * This is the difference between "ask" and "wait 2000 ms and take it anyway",
+ * and without it a Cancel button on a "save changes?" box is decoration. The
+ * grace period is aimed at a zapp that has stopped answering; a zapp that says
+ * no is answering. What that costs is that a zapp determined to keep its window
+ * can -- which is the same bargain every desktop makes, and the reason they all
+ * have an end-task of some kind. This one does not yet.
+ */
+void zd_wm_window_close_cancel(struct zd_client *client);
 
 /**
  * @brief Mark a window for destruction.

@@ -44,10 +44,23 @@ void zd_keys_modifier(uint16_t mod, bool held);
  * @param unicode the codepoint, when @p code is ZD_KEY_CHAR; 0 otherwise.
  *
  * Presses only. A source that sees releases drops them; nothing downstream
- * wants them, and they would double the traffic through a dispatch path that
- * runs on the desktop thread.
+ * wants them, and they would double the traffic.
+ *
+ * QUEUES rather than delivers. Safe to call from any thread and from an ISR;
+ * the routing, and everything it touches in LVGL, happens later on the desktop
+ * thread. See the header comment in keys.c for what happened the first time it
+ * did not.
  */
 void zd_keys_press(uint32_t code, uint32_t unicode);
+
+/**
+ * @brief Deliver every queued key press.
+ *
+ * Called from the desktop loop with the LVGL lock held, next to the reaps and
+ * for the same reason: this is where it is legal to touch LVGL and to re-enter
+ * a zapp.
+ */
+void zd_keys_pump(void);
 
 /** The modifiers currently held, as a mask of ZD_MOD_*. */
 uint16_t zd_keys_mods(void);

@@ -450,6 +450,15 @@ void zd_zapp_on_client_minimized(struct zd_client *client, bool minimized)
 	zd_zapp_dispatch(inst, &ev);
 }
 
+bool zd_zapp_on_client_close_stalled(struct zd_client *client)
+{
+	/* The WM has no idea what a dialog is and the dialog code has no idea
+	 * what a client is; the loader is the only place that knows both, which
+	 * is why the hook lands here rather than either of them.
+	 */
+	return client->owner != NULL && zd_dialog_open_for(client->owner);
+}
+
 bool zd_zapp_on_client_close_request(struct zd_client *client)
 {
 	struct zd_zapp_instance *inst = client->owner;

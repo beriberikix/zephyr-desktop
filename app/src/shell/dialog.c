@@ -7,11 +7,19 @@
  * hundred microseconds of construction would be the wrong trade in both memory
  * and complexity.
  *
- * Answering is DEFERRED, for the third time in this project and the same reason
- * every time: a zapp told "yes, discard it" will very reasonably close its
- * window, from a stack frame standing inside the LVGL dispatch of the button it
- * just clicked. The dialog is hidden immediately and zd_dialog_reap() empties
- * it from the desktop loop.
+ * BOTH ENDS ARE DEFERRED, and the second one is less obvious than the first.
+ *
+ * Answering is deferred for the reason every deferral in this project exists: a
+ * zapp told "yes, discard it" will very reasonably close its window, from a
+ * stack frame standing inside the LVGL dispatch of the button it just clicked.
+ *
+ * OPENING is deferred because the answer to one dialog is very often another
+ * dialog. Notepad's close handshake is exactly this: "save it?" -> Yes -> "save
+ * as what?". Building the second dialog inline would lv_obj_clean() the panel
+ * holding the Yes button whose dispatch is still on the stack -- the same
+ * use-after-free, arrived at from the opposite direction. So a request is
+ * recorded, the dialog is open as far as everyone else is concerned, and
+ * zd_dialog_reap() builds it one loop iteration later.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -50,6 +58,19 @@ LOG_MODULE_DECLARE(zd_main, CONFIG_ZD_LOG_LEVEL);
  */
 BUILD_ASSERT(BTN_W >= 44, "a dialog button is too narrow to hit");
 
+/*
+ * A dialog that has been asked for but not yet built. See the header comment:
+ * the request is recorded here and turned into widgets from the desktop loop.
+ */
+static struct {
+	bool valid;
+	bool is_file;
+	char title[32];
+	char msg[128];
+	uint32_t arg; /**< buttons for a confirm, mode for a file dialog */
+	enum zd_dir dir;
+} want;
+
 static struct {
 	lv_obj_t *shade;
 	lv_obj_t *panel;
@@ -86,6 +107,8 @@ static void finish(int16_t result)
 		return;
 	}
 
+	LOG_DBG("dialog id %u answered %d", dlg.id, result);
+
 	dlg.open = false;
 	dlg.dismissed = true;
 	dlg.owner = NULL;
@@ -106,16 +129,31 @@ void zd_dialog_cancel(void)
 	finish(ZD_DLG_CANCEL);
 }
 
+static void build_confirm(void);
+static void build_file(void);
+
 void zd_dialog_reap(void)
 {
-	if (!dlg.dismissed) {
-		return;
+	if (dlg.dismissed) {
+		dlg.dismissed = false;
+		dlg.list = NULL;
+		dlg.field = NULL;
+		lv_obj_clean(dlg.panel);
 	}
 
-	dlg.dismissed = false;
-	dlg.list = NULL;
-	dlg.field = NULL;
-	lv_obj_clean(dlg.panel);
+	/* Empty first, then build: a request made while the previous dialog was
+	 * still on screen must not be wiped by its cleanup.
+	 */
+	if (want.valid) {
+		want.valid = false;
+		LOG_DBG("dialog '%s' up (id %u, %s)", want.title, dlg.id,
+			want.is_file ? "file" : "confirm");
+		if (want.is_file) {
+			build_file();
+		} else {
+			build_confirm();
+		}
+	}
 }
 
 void zd_dialog_owner_gone(struct zd_zapp_instance *inst)
@@ -134,6 +172,11 @@ void zd_dialog_owner_gone(struct zd_zapp_instance *inst)
 bool zd_dialog_open(void)
 {
 	return dlg.open;
+}
+
+bool zd_dialog_open_for(const struct zd_zapp_instance *inst)
+{
+	return dlg.open && dlg.owner == inst;
 }
 
 /* --- widgets -------------------------------------------------------------------- */
@@ -244,17 +287,10 @@ static int32_t open_panel(const char *title, int32_t w, int32_t h)
 
 /* --- confirm --------------------------------------------------------------------- */
 
-int zd_dialog_confirm(struct zd_zapp_instance *owner, struct zd_client *client,
-		      const char *title, const char *msg, uint32_t buttons, uint16_t id)
+/** Record what was asked for. The widgets happen in zd_dialog_reap(). */
+static int request(struct zd_zapp_instance *owner, struct zd_client *client,
+		   const char *title, uint16_t id, bool is_file)
 {
-	int32_t screen_w = lv_display_get_horizontal_resolution(NULL);
-	int32_t w = MIN(screen_w - 24, 272);
-	int32_t body = 3 * 14; /* room for three wrapped lines of montserrat 12 */
-	int32_t h = ZD_FRAME_PAD + TITLE_H + PAD + body + PAD + BTN_H + PAD;
-	int32_t y;
-	int32_t x;
-	int n = (buttons == ZD_DLG_YES_NO_CANCEL) ? 3 : 2;
-
 	if (dlg.open) {
 		return -EBUSY; /* one at a time, and system modal means system */
 	}
@@ -262,12 +298,46 @@ int zd_dialog_confirm(struct zd_zapp_instance *owner, struct zd_client *client,
 	dlg.owner = owner;
 	dlg.client = client;
 	dlg.id = id;
-	dlg.is_file = false;
+	dlg.is_file = is_file;
 	dlg.open = true;
 	dlg.path[0] = '\0';
 
-	y = open_panel(title != NULL ? title : "", w, h);
-	text_at(dlg.panel, msg != NULL ? msg : "", PAD + ZD_FRAME_PAD, y,
+	want.valid = true;
+	want.is_file = is_file;
+	(void)strncpy(want.title, title != NULL ? title : "", sizeof(want.title) - 1);
+	want.title[sizeof(want.title) - 1] = '\0';
+
+	return 0;
+}
+
+int zd_dialog_confirm(struct zd_zapp_instance *owner, struct zd_client *client,
+		      const char *title, const char *msg, uint32_t buttons, uint16_t id)
+{
+	int ret = request(owner, client, title, id, false);
+
+	if (ret != 0) {
+		return ret;
+	}
+
+	want.arg = buttons;
+	(void)strncpy(want.msg, msg != NULL ? msg : "", sizeof(want.msg) - 1);
+	want.msg[sizeof(want.msg) - 1] = '\0';
+
+	return 0;
+}
+
+static void build_confirm(void)
+{
+	int32_t screen_w = lv_display_get_horizontal_resolution(NULL);
+	int32_t w = MIN(screen_w - 24, 272);
+	int32_t body = 3 * 14; /* room for three wrapped lines of montserrat 12 */
+	int32_t h = ZD_FRAME_PAD + TITLE_H + PAD + body + PAD + BTN_H + PAD;
+	int32_t y;
+	int32_t x;
+	int n = (want.arg == ZD_DLG_YES_NO_CANCEL) ? 3 : 2;
+
+	y = open_panel(want.title, w, h);
+	text_at(dlg.panel, want.msg, PAD + ZD_FRAME_PAD, y,
 		w - 2 * (PAD + ZD_FRAME_PAD), ZD_C_TEXT);
 
 	/* Right-aligned, in the Win95 order: the affirmative first, Cancel
@@ -276,7 +346,7 @@ int zd_dialog_confirm(struct zd_zapp_instance *owner, struct zd_client *client,
 	y = h - PAD - BTN_H;
 	x = w - PAD - ZD_FRAME_PAD - n * BTN_W - (n - 1) * BTN_GAP;
 
-	if (buttons == ZD_DLG_YES_NO_CANCEL) {
+	if (want.arg == ZD_DLG_YES_NO_CANCEL) {
 		add_button(x, y, "Yes", ZD_DLG_YES);
 		x += BTN_W + BTN_GAP;
 		add_button(x, y, "No", ZD_DLG_NO);
@@ -287,8 +357,6 @@ int zd_dialog_confirm(struct zd_zapp_instance *owner, struct zd_client *client,
 	}
 
 	add_button(x, y, "Cancel", ZD_DLG_CANCEL);
-
-	return 0;
 }
 
 /* --- file picker ------------------------------------------------------------------ */
@@ -399,36 +467,47 @@ static int fill_list(int32_t w)
 int zd_dialog_file(struct zd_zapp_instance *owner, struct zd_client *client,
 		   const char *title, enum zd_dir dir, uint32_t mode, uint16_t id)
 {
+	char probe[ZD_PATH_MAX];
+	int ret;
+
+	/* Resolve now rather than at build time: an unusable directory is the
+	 * caller's error and should come back from the call that made it, not
+	 * arrive silently a frame later.
+	 */
+	if (zd_session_path(dlg.session, dir, probe, sizeof(probe)) != 0) {
+		return -EINVAL;
+	}
+
+	ret = request(owner, client, title, id, true);
+	if (ret != 0) {
+		return ret;
+	}
+
+	want.arg = mode;
+	want.dir = dir;
+	(void)strncpy(dlg.dir, probe, sizeof(dlg.dir) - 1);
+	dlg.dir[sizeof(dlg.dir) - 1] = '\0';
+
+	return 0;
+}
+
+static void build_file(void)
+{
 	int32_t screen_w = lv_display_get_horizontal_resolution(NULL);
 	int32_t screen_h = lv_display_get_vertical_resolution(NULL);
 	int32_t w = MIN(screen_w - 24, 272);
 	int32_t inner = w - 2 * (PAD + ZD_FRAME_PAD);
-	bool save = (mode == ZD_DLG_SAVE);
+	bool save = (want.arg == ZD_DLG_SAVE);
 	int32_t list_h;
 	int32_t h;
 	int32_t y;
 	int32_t x;
 
-	if (dlg.open) {
-		return -EBUSY;
-	}
-
-	if (zd_session_path(dlg.session, dir, dlg.dir, sizeof(dlg.dir)) != 0) {
-		return -EINVAL;
-	}
-
 	list_h = MIN(screen_h / 2, 6 * ROW_H);
 	h = ZD_FRAME_PAD + TITLE_H + PAD + list_h + PAD + (save ? FIELD_H + PAD : 0) +
 	    BTN_H + PAD;
 
-	dlg.owner = owner;
-	dlg.client = client;
-	dlg.id = id;
-	dlg.is_file = true;
-	dlg.open = true;
-	dlg.path[0] = '\0';
-
-	y = open_panel(title != NULL ? title : "", w, h);
+	y = open_panel(want.title, w, h);
 
 	dlg.list = lv_obj_create(dlg.panel);
 	lv_obj_remove_style_all(dlg.list);
@@ -475,8 +554,6 @@ int zd_dialog_file(struct zd_zapp_instance *owner, struct zd_client *client,
 	x = w - PAD - ZD_FRAME_PAD - 2 * BTN_W - BTN_GAP;
 	add_button(x, y, save ? "Save" : "Open", ZD_DLG_OK);
 	add_button(x + BTN_W + BTN_GAP, y, "Cancel", ZD_DLG_CANCEL);
-
-	return 0;
 }
 
 int zd_dialog_get_path(struct zd_zapp_instance *owner, char *buf, uint32_t len)
@@ -523,7 +600,10 @@ bool zd_dialog_key(uint32_t code, uint32_t unicode, uint16_t mods)
 			return true;
 		}
 
-		if (!dlg.is_file) {
+		/* An open dialog has no field, so Enter means "the one that is
+		 * chosen" -- and nothing at all until something is.
+		 */
+		if (!dlg.is_file || dlg.path[0] != '\0') {
 			finish(ZD_DLG_OK);
 		}
 		return true;

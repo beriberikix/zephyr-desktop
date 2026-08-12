@@ -87,6 +87,15 @@ void zd_zapp_on_client_key(struct zd_client *client, uint32_t code, uint32_t uni
  */
 bool zd_zapp_on_client_close_request(struct zd_client *client);
 
+/**
+ * @brief Is this window's zapp visibly asking the user about the close?
+ *
+ * Installed as wm->on_client_close_stalled. True buys another grace period,
+ * because a zapp showing "save changes?" is doing what the close request asked
+ * of it, not ignoring it.
+ */
+bool zd_zapp_on_client_close_stalled(struct zd_client *client);
+
 /** Finish teardowns. Runs from the desktop loop, never from dispatch. */
 void zd_zapp_reap(void);
 

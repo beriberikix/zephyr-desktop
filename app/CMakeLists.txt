@@ -53,6 +53,7 @@ target_sources(app PRIVATE
   src/host/host_api.c
   src/host/text_api.c
   src/host/clipboard.c
+  src/host/clock.c
   src/loader/zapp_loader.c
   src/loader/zapp_instance.c
   src/input/keys.c
@@ -93,7 +94,7 @@ target_sources_ifdef(CONFIG_ZD_SEED_BUILTIN_ZAPPS app PRIVATE src/loader/seed.c)
 # `west build -t llext-edk` plus an independent CMake project. Keeping the ABI
 # header outside app/ is what makes that a move rather than a rewrite.
 
-set(ZD_ZAPP_NAMES hello notes badabi)
+set(ZD_ZAPP_NAMES hello notes badabi notepad)
 
 # hello stays a single translation unit on purpose: it is the proof that the
 # simplest possible zapp is still the simplest possible zapp, and it is the only
@@ -102,6 +103,12 @@ set(ZD_ZAPP_NAMES hello notes badabi)
 set(ZD_hello_SOURCES  ${ZD_ZAPPS}/hello/hello.c)
 set(ZD_notes_SOURCES  ${ZD_ZAPPS}/notes/notes.c ${ZD_ZAPPS}/lib/zapplib.c)
 set(ZD_badabi_SOURCES ${ZD_ZAPPS}/badabi/badabi.c)
+set(ZD_notepad_SOURCES
+  ${ZD_ZAPPS}/notepad/notepad.c
+  ${ZD_ZAPPS}/notepad/commands.c
+  ${ZD_ZAPPS}/notepad/document.c
+  ${ZD_ZAPPS}/lib/zapplib.c
+)
 
 foreach(zd_app ${ZD_ZAPP_NAMES})
   set(ZD_${zd_app}_LLEXT ${PROJECT_BINARY_DIR}/${zd_app}.llext)

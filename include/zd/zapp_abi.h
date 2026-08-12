@@ -35,6 +35,15 @@ extern "C" {
 #define ZD_ZAPP_NAME_MAX 24
 
 /**
+ * Longest window title, terminator included.
+ *
+ * Part of the ABI since 0.5, because a zapp building a title -- "*name -
+ * Notepad" -- needs somewhere to build it, and the alternative was for it to
+ * guess. Longer titles are truncated, not refused.
+ */
+#define ZD_TITLE_MAX 32
+
+/**
  * Longest single filename in a directory listing.
  *
  * Must exceed what the underlying filesystem can produce, or a listing would
@@ -63,6 +72,13 @@ typedef struct zd_file *zd_file_t;
  * keeps struct and enum tags in one namespace and `struct zd_dir` would collide.
  */
 typedef struct zd_dir_handle *zd_dir_t;
+
+/** Wall-clock time as the desktop understands it. See clock_now(). */
+struct zd_time {
+	uint8_t hour;   /**< 0..23 */
+	uint8_t minute;
+	uint8_t second;
+};
 
 struct zd_rect {
 	int16_t x;
@@ -529,6 +545,15 @@ struct zd_host_api {
 			     uint32_t len);
 	/** @return length in bytes, excluding the terminator. */
 	int (*text_get_length)(zd_zapp_ctx_t ctx, zd_text_t text);
+	/**
+	 * @return the most bytes this widget will hold.
+	 *
+	 * Ask, do not assume: the bound is the desktop's, it differs between
+	 * boards, and a zapp that guessed would either refuse files it could
+	 * have opened or accept ones it will silently truncate. "This file is
+	 * too large for Notepad" is only honest if it is checked.
+	 */
+	int (*text_get_capacity)(zd_zapp_ctx_t ctx, zd_text_t text);
 	/** Insert at the caret, replacing the selection if there is one. */
 	int (*text_insert)(zd_zapp_ctx_t ctx, zd_text_t text, const char *s);
 	int (*text_set_geometry)(zd_zapp_ctx_t ctx, zd_text_t text,
@@ -652,6 +677,45 @@ struct zd_host_api {
 	 *         truncated path, because half a path still opens something.
 	 */
 	int (*dialog_get_path)(zd_zapp_ctx_t ctx, char *buf, uint32_t len);
+
+	/* --- ABI 0.5: the desktop clock ------------------------------------ */
+
+	/**
+	 * @brief What time the desktop thinks it is.
+	 *
+	 * The same answer the taskbar's clock shows, deliberately: two
+	 * independent guesses disagreeing on one screen is worse than one
+	 * guess. And on the targets so far it IS a guess -- there is no RTC on
+	 * qemu_cortex_a53, so this counts up from a fixed start rather than
+	 * reporting 00:00 since boot. A board with an RTC makes every caller
+	 * correct at once without any of them changing.
+	 *
+	 * uptime_ms() remains the right call for measuring an interval. This
+	 * one is for showing a person a time.
+	 */
+	int (*clock_now)(zd_zapp_ctx_t ctx, struct zd_time *out);
+
+	/* --- ABI 0.5: declining a close ------------------------------------ */
+
+	/**
+	 * @brief Answer ZD_EV_WINDOW_CLOSE_REQUEST with "no".
+	 *
+	 * The window stays and the outstanding request is dropped, so the
+	 * user's next click on the close box starts the conversation over --
+	 * you will be asked again, and can ask them again.
+	 *
+	 * This is what makes the Cancel button on a "save changes?" box mean
+	 * anything. Without it, declining and saying nothing are the same
+	 * thing: the grace period expires and the desktop takes the window.
+	 *
+	 * The rule 0.4 stated has therefore been sharpened rather than
+	 * abandoned. A zapp cannot keep a window by IGNORING the request --
+	 * silence still loses it after CONFIG_ZD_CLOSE_GRACE_MS. It can keep it
+	 * by answering, which is the bargain every desktop makes. Do not use
+	 * this to be unclosable; there is no end-task here yet to save the user
+	 * from you.
+	 */
+	void (*window_close_cancel)(zd_zapp_ctx_t ctx, zd_window_t win);
 };
 
 /* --- the zapp's side ------------------------------------------------------- */

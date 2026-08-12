@@ -119,6 +119,7 @@ int main(void)
 	wm.on_client_key = zd_zapp_on_client_key;
 	wm.on_client_text_key = zd_text_on_client_key;
 	wm.on_client_close_request = zd_zapp_on_client_close_request;
+	wm.on_client_close_stalled = zd_zapp_on_client_close_stalled;
 	zd_keys_init(&wm);
 	zd_tasklist_init(layers.panel, &wm);
 	wm.on_client_list_changed = zd_tasklist_invalidate;
@@ -165,6 +166,13 @@ int main(void)
 		 */
 		zd_menu_reap();
 		zd_dialog_reap();
+
+		/* Keys arrive on Zephyr's input thread and everything they
+		 * touch is LVGL's, so they are queued there and delivered
+		 * here -- after the reaps, so a key never lands on a window
+		 * that is already on its way out.
+		 */
+		zd_keys_pump();
 
 		/* After the reaps, for the same reason the taskbar rebuild is:
 		 * it launches and closes windows, which must never happen from

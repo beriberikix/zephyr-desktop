@@ -335,6 +335,11 @@ int zd_text_get_length(struct zd_zapp_instance *owner, uintptr_t handle)
 	return rec != NULL ? (int)strlen(text_of(rec)) : -EINVAL;
 }
 
+int zd_text_get_capacity(struct zd_zapp_instance *owner, uintptr_t handle)
+{
+	return rec_of(owner, handle) != NULL ? CONFIG_ZD_TEXT_MAX : -EINVAL;
+}
+
 int zd_text_insert(struct zd_zapp_instance *owner, uintptr_t handle, const char *s)
 {
 	struct text_rec *rec = rec_of(owner, handle);

@@ -17,6 +17,7 @@
 #include <zephyr/logging/log.h>
 
 #include "clipboard.h"
+#include "clock.h"
 #include "fs_api.h"
 #include "host_api.h"
 #include "session.h"
@@ -149,6 +150,15 @@ static int api_window_get_geometry(zd_zapp_ctx_t ctx, zd_window_t win, struct zd
 	return 0;
 }
 
+static void api_window_close_cancel(zd_zapp_ctx_t ctx, zd_window_t win)
+{
+	struct zd_client *client = window_of(ctx, win);
+
+	if (client != NULL) {
+		zd_wm_window_close_cancel(client);
+	}
+}
+
 static int api_window_minimize(zd_zapp_ctx_t ctx, zd_window_t win)
 {
 	struct zd_client *client = window_of(ctx, win);
@@ -271,6 +281,13 @@ static int api_text_get_length(zd_zapp_ctx_t ctx, zd_text_t text)
 	struct zd_zapp_instance *inst = instance_of(ctx);
 
 	return inst != NULL ? zd_text_get_length(inst, (uintptr_t)text) : -EINVAL;
+}
+
+static int api_text_get_capacity(zd_zapp_ctx_t ctx, zd_text_t text)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_text_get_capacity(inst, (uintptr_t)text) : -EINVAL;
 }
 
 static int api_text_insert(zd_zapp_ctx_t ctx, zd_text_t text, const char *s)
@@ -430,6 +447,18 @@ static int api_dialog_get_path(zd_zapp_ctx_t ctx, char *buf, uint32_t len)
 	struct zd_zapp_instance *inst = instance_of(ctx);
 
 	return inst != NULL ? zd_dialog_get_path(inst, buf, len) : -EINVAL;
+}
+
+static int api_clock_now(zd_zapp_ctx_t ctx, struct zd_time *out)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	if (inst == NULL || out == NULL) {
+		return -EINVAL;
+	}
+
+	zd_clock_now(out);
+	return 0;
 }
 
 /* --- clipboard --------------------------------------------------------------- */
@@ -681,7 +710,8 @@ static void *api_unsafe_lvgl_content(zd_zapp_ctx_t ctx, zd_window_t win)
 	.fs_rename = api_fs_rename, .window_minimize = api_window_minimize,                 \
 	.window_restore = api_window_restore, .text_create = api_text_create,               \
 	.text_destroy = api_text_destroy, .text_set_text = api_text_set_text,               \
-	.text_get_text = api_text_get_text, .text_get_length = api_text_get_length,         \
+	.text_get_text = api_text_get_text, .text_get_length = api_text_get_length,                                             \
+	.text_get_capacity = api_text_get_capacity,         \
 	.text_insert = api_text_insert, .text_set_geometry = api_text_set_geometry,         \
 	.text_set_cursor = api_text_set_cursor, .text_get_cursor = api_text_get_cursor,     \
 	.text_get_selection = api_text_get_selection, .text_select = api_text_select,       \
@@ -695,7 +725,8 @@ static void *api_unsafe_lvgl_content(zd_zapp_ctx_t ctx, zd_window_t win)
 	.menu_set_item_enabled = api_menu_set_item_enabled,                                 \
 	.window_get_content_size = api_window_get_content_size,                             \
 	.dialog_confirm = api_dialog_confirm, .dialog_file = api_dialog_file,               \
-	.dialog_get_path = api_dialog_get_path
+	.dialog_get_path = api_dialog_get_path, .clock_now = api_clock_now,                \
+	.window_close_cancel = api_window_close_cancel
 
 static const struct zd_host_api host_api_untrusted = {
 	ZD_HOST_API_COMMON,
