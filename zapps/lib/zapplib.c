@@ -65,6 +65,33 @@ uint32_t z_len(const char *s)
 	return (uint32_t)(p - s);
 }
 
+uint32_t z_rand32(uint32_t *state)
+{
+	/* A zero seed is a fixed point of xorshift -- it would return zero for
+	 * ever, which looks exactly like a broken board. Substitute a constant
+	 * rather than refusing, so a caller that forgot to seed still gets a
+	 * game, just the same one every time.
+	 */
+	uint32_t x = *state != 0 ? *state : 0x2545F491u;
+
+	x ^= x << 13;
+	x ^= x >> 17;
+	x ^= x << 5;
+
+	*state = x;
+	return x;
+}
+
+uint32_t z_rand_below(uint32_t *state, uint32_t n)
+{
+	/* Modulo, and the bias is real and irrelevant: n here is the number of
+	 * squares on a board, so the skew is one part in ten million. Rejection
+	 * sampling would be the honest fix if this were ever used for anything
+	 * that mattered.
+	 */
+	return n != 0 ? z_rand32(state) % n : 0;
+}
+
 bool z_eq(const char *a, const char *b)
 {
 	while (*a != '\0' && *a == *b) {

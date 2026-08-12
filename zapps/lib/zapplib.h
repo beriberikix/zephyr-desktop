@@ -48,6 +48,23 @@ void z_move(void *dst, const void *src, uint32_t len);
 /** @return the length of @p s, excluding the terminator. */
 uint32_t z_len(const char *s);
 
+/**
+ * @brief A pseudo-random number, from a seed the caller keeps.
+ *
+ * xorshift32: three shifts and three xors, no table, no libc, and no hidden
+ * global -- the state is the caller's, which matters here for the same reason
+ * everything else per-instance does. Two copies of one zapp share .bss, so a
+ * file-scope generator would mean two Minesweeper boards drawing from one
+ * sequence and, on the same tick, laying identical mines.
+ *
+ * Not for anything that has to be unguessable. A zero seed is replaced with a
+ * constant rather than sticking at zero forever, which is xorshift's one trap.
+ */
+uint32_t z_rand32(uint32_t *state);
+
+/** @return a value in [0, @p n). 0 if @p n is 0. */
+uint32_t z_rand_below(uint32_t *state, uint32_t n);
+
 /** @return true if the two strings are equal. */
 bool z_eq(const char *a, const char *b);
 

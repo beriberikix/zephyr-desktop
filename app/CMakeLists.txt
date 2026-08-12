@@ -99,7 +99,7 @@ target_sources_ifdef(CONFIG_ZD_SEED_BUILTIN_ZAPPS app PRIVATE src/loader/seed.c)
 # `west build -t llext-edk` plus an independent CMake project. Keeping the ABI
 # header outside app/ is what makes that a move rather than a rewrite.
 
-set(ZD_ZAPP_NAMES hello notes badabi notepad files)
+set(ZD_ZAPP_NAMES hello notes badabi notepad files mines)
 
 # hello stays a single translation unit on purpose: it is the proof that the
 # simplest possible zapp is still the simplest possible zapp, and it is the only
@@ -118,6 +118,12 @@ set(ZD_files_SOURCES
   ${ZD_ZAPPS}/files/files.c
   ${ZD_ZAPPS}/files/browse.c
   ${ZD_ZAPPS}/files/commands.c
+  ${ZD_ZAPPS}/lib/zapplib.c
+)
+set(ZD_mines_SOURCES
+  ${ZD_ZAPPS}/mines/mines.c
+  ${ZD_ZAPPS}/mines/board.c
+  ${ZD_ZAPPS}/mines/render.c
   ${ZD_ZAPPS}/lib/zapplib.c
 )
 
