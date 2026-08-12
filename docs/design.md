@@ -1346,6 +1346,68 @@ rather than an apology. Worth recording that the pessimistic reading was mine
 and it was wrong: the clamp behaved better in a hand than it did on paper, which
 is the whole reason `grid_fit()` picks the board instead of a constant.
 
+### N — Cutting a release — **DONE (v0.1.0)**
+
+No new desktop code. The question was what stands between thirteen milestones of
+working software and something a stranger can be handed, and the answer turned
+out to be almost entirely *outside* `app/`.
+
+66. ✅ **`LICENSE`.** Every source file has carried an Apache-2.0 SPDX tag since
+    milestone A, and the text those tags point at was not in the repository. The
+    three `tools/*.py` without a tag got one.
+67. ✅ **`app/VERSION`**, giving `APP_VERSION_STRING` through Zephyr's own
+    mechanism, and a first console line naming the release, the commit
+    (`git describe`, wired to reconfigure when HEAD or the index moves) and the
+    ABI version. That line answers "is the board running the image I just
+    built?", which is the question milestone J got wrong twice.
+68. ✅ **`tools/ci-check.sh`** — three boards built, both QEMU images run, every
+    `.llext`'s imports checked, the Kconfig warnings read per board.
+69. ✅ **`.github/workflows/build.yml`**, a thin caller. First CI this project
+    has had, and the first time `west init -l manifest && west update` will have
+    been run by anyone but its author: `.west/` is gitignored and the working
+    tree has been the workspace since day one.
+70. ✅ **`tools/mkrelease.sh`** and **`CHANGELOG.md`**.
+
+**[N] Three of the four bugs this milestone found were found by writing the
+check, not by running it.** Deciding that CI would fail on Kconfig's "was
+assigned the value" warning meant every existing instance of that warning had to
+go first — and there were two, one of them live:
+
+- **`CONFIG_LLEXT_HEAP_SIZE=384` in `prj.conf` reached the Harvard CoreS3**,
+  which has no such symbol. Known, documented, warned on every build for a
+  milestone, and still there. Moved to the two ARM fragments.
+- **The RT1060's own fragment then turned out to set 256**, which beats
+  `prj.conf` — under a comment claiming parity with QEMU, which is what made it
+  invisible. At 256 KB the sixth zapp does not load on that board. It has been
+  wrong since Minesweeper landed and nobody could have seen it, because the EVK
+  is headless and has never been run on silicon.
+
+The fourth was found by the check itself, on its first clean run:
+**`CONFIG_STACK_SENTINEL=y` does nothing on the RT1060**, because it depends on
+`!MPU_STACK_GUARD` and the Cortex-M7 has the hardware guard. Harmless — the
+hardware guard is the better of the two — but the same shape as the other two,
+so stack protection is now chosen per board and the RT1060's fragment says in
+words why it has none of its own.
+
+**[N] The warning does not say what CLAUDE.md said it says, and the first
+version of the check could never have fired.** `CLAUDE.md` had quoted it as
+`was assigned the value '384' but got (undefined)`; the real text is `...but
+got` / `the value ''. Check these unsatisfied dependencies: (!HARVARD) (=n).`
+— **wrapped at about 100 columns**, so a grep for the whole phrase silently
+matches nothing. It was caught by deliberately reintroducing the bad assignment
+to watch the detector fire, which it did not. Generalise: *a check that has
+never failed is not known to work*, and the cheapest way to know is to break the
+thing on purpose once.
+
+**[N] What a release can give that a tag cannot is the SD-card tree.** Anyone
+running QEMU will build it themselves. The artifact nobody can produce without
+the whole toolchain is six `.llext` files per architecture in the layout the
+desktop expects — and getting it wrong is silent until relocation. What
+`mkrelease.sh` deliberately does *not* ship is a flashable CoreS3 image: that
+needs a bootloader and partition table assembled by the Espressif HAL at flash
+time, and shipping `zephyr.bin` as "the firmware" would be a lie that fails at
+0x0.
+
 ---
 
 ## 8. Explicitly deferred
@@ -1491,6 +1553,11 @@ another left it in ABI 0.6** — see milestone L.
 
 ## 10. Verification
 
+- **All of it, in one command, as of [N]:** `tools/ci-check.sh`. Three boards built
+  and read unfiltered, both QEMU images run, every `.llext`'s imports checked, and
+  an exit status that is the number of failed checks. `ZD_CI_BOARDS=qemu
+  ZD_CI_PRISTINE=0` is the fast inner loop. Everything below is what it is made of,
+  and is still worth reaching for one at a time while debugging.
 - **Per milestone:** `west build -b qemu_cortex_a53 app && west build -t run`, and look at
   the cocoa window. Every milestone A–G is demoable this way.
 - **The success criterion, end to end (after G):** boot → retro desktop with patterned

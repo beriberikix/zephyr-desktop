@@ -1,5 +1,7 @@
 # zephyr-desktop
 
+[![build](https://github.com/beriberikix/zephyr-desktop/actions/workflows/build.yml/badge.svg)](https://github.com/beriberikix/zephyr-desktop/actions/workflows/build.yml)
+
 A retro desktop shell on [Zephyr RTOS](https://zephyrproject.org) + [LVGL](https://lvgl.io):
 overlapping draggable windows with hand-built Win95-era chrome, a taskbar with a
 launcher and clock, and **zapps as `.llext` extensions discovered on a filesystem
@@ -190,6 +192,7 @@ permission shim is the only linkable route to the filesystem.
 
 | | |
 |---|---|
+| [CHANGELOG.md](CHANGELOG.md) | What changed per release, and what the desktop's version number means next to the ABI's |
 | [docs/design.md](docs/design.md) | The design doc and milestone log, including everything the build taught us that the plan got wrong |
 | [docs/abi.md](docs/abi.md) | The zapp ABI: versioning, ordering guarantees, handles, the symbol surface |
 | [docs/hardware.md](docs/hardware.md) | Hardware runbooks: MIMXRT1060-EVK and M5Stack CoreS3 |

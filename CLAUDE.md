@@ -138,8 +138,13 @@ west build -t run                                     # opens a cocoa window
 ### Checking it without a hand
 
 `west build -t run` opens a window and offers no way in but a mouse, which is how
-milestone J came to hand-test a stale binary twice. Two things fix that and both are
-worth reaching for before believing anything:
+milestone J came to hand-test a stale binary twice.
+
+**`tools/ci-check.sh` is all of it in one command** — three boards built, both QEMU
+images run, every `.llext`'s imports checked, the Kconfig warnings read per board,
+and an exit status that is the number of failed checks. Run it before believing a
+milestone is done. `.github/workflows/build.yml` is a thin caller, so anything that
+fails in CI reproduces here with one line. The pieces, for when you want just one:
 
 ```sh
 # Drive the image headless: click, type, assert on the console.
@@ -147,6 +152,8 @@ tools/qemu-drive.py -d build 'click:30,258' 'wait:1' 'type:hello' 'key:ctrl-s'
 
 # Launch every zapp, close every window, prove the counters came back.
 west build -b qemu_cortex_a53 app -- -DEXTRA_CONF_FILE=smoke.conf   # CONFIG_ZD_SMOKE_TEST=y
+
+ZD_CI_BOARDS=qemu ZD_CI_PRISTINE=0 tools/ci-check.sh   # the fast inner loop
 ```
 
 Read build output **unfiltered**. A `grep` for `error` hid a failure in milestone J and
@@ -154,11 +161,18 @@ QEMU then happily ran the previous ELF and reported a false pass.
 
 **Read the Kconfig warnings too, and read them per board.** `CONFIG_LLEXT_HEAP_SIZE`
 does not exist on the CoreS3 — ESP32-S3 is Harvard, so the heap is two heaps —
-and raising it for ARM in `app/prj.conf` did nothing there for a whole
-milestone while Kconfig said `was assigned the value '384' but got (undefined)`
-on every single build. Same shape as `[H]`'s board fragment whose `=n` was
-overridden by a `select`. A knob that does not exist on a target is a knob that
-silently does nothing, and the build does tell you.
+and setting it in `app/prj.conf` did nothing there for a whole milestone while
+Kconfig warned on every single build. Same shape as `[H]`'s board fragment whose
+`=n` was overridden by a `select`. A knob that does not exist on a target is a knob
+that silently does nothing, and the build does tell you. It now lives in the two ARM
+board fragments and `ci-check.sh` fails on the warning.
+
+**Note how that warning is worded, because the obvious grep does not match it.**
+It reads `was assigned the value '384' but got` / `the value ''. Check these
+unsatisfied dependencies: (!HARVARD) (=n).` — *wrapped*, at about 100 columns, so
+a search for the whole phrase silently finds nothing. The first version of the CI
+check did exactly that and passed on a build that was warning. Match `was assigned
+the value` and read the next two lines.
 
 And read the smoke test's *reasons*, not its counts. `badabi` is last in the seed
 order, so when the llext heap stops holding one more zapp it is the entry that is
