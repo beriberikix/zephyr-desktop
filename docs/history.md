@@ -33,9 +33,10 @@ those letters are what comments in `app/src/` mean when they say "milestone J".
 
 ## 1. Recon findings (verified against the tree, not from memory)
 
-Verified against `/Users/jberi/code/zephyr-things/really-native-sim/zephyr`
-(Zephyr `main`, VERSION 4.4.99, HEAD `7a8aaac0`, `main` at `e201b84b` 2026-07-31) and by
-running your SDK's QEMU on this machine.
+Verified against a local Zephyr checkout (`main`, VERSION 4.4.99, HEAD
+`7a8aaac0`, `main` at `e201b84b` 2026-07-31) and by running the Zephyr SDK's
+QEMU, rather than from memory. Every file and line reference below was read at
+that commit; the pin in `manifest/west.yml` is the same one.
 
 ### 1.1 llext arch support — your suspicion was correct
 
