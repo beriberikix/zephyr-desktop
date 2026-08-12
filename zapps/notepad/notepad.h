@@ -53,7 +53,6 @@
 #define NP_EDIT_PASTE  12
 #define NP_EDIT_DELETE 13
 #define NP_EDIT_SELALL 14
-#define NP_EDIT_TIME   15
 
 /* Dialog ids, in the same namespace sense: ours. */
 #define NP_DLG_SAVE_CHANGES 1

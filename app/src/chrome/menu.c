@@ -182,6 +182,8 @@ static void item_clicked(lv_event_t *e)
 	ev.win = (zd_window_t)m->client->handle;
 	ev.menu.id = m->items[index].id;
 
+	LOG_DBG("menu item '%s' chosen (id %u)", m->items[index].label, ev.menu.id);
+
 	/* Hide first, dispatch second. The zapp may answer File -> Exit by
 	 * closing its window, and the desktop must already believe the menu is
 	 * gone by the time that happens.

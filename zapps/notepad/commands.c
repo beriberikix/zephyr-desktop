@@ -181,29 +181,6 @@ void np_command(zd_zapp_ctx_t ctx, struct np_state *st, uint16_t id)
 					   (uint32_t)np_host->text_get_length(ctx, st->text));
 		break;
 
-	case NP_EDIT_TIME: {
-		/* F5 in the original. The time comes from the desktop, which is
-		 * the same answer the taskbar shows -- it is a fiction on a
-		 * board with no RTC, but at least it is one fiction.
-		 */
-		struct zd_time now;
-		char stamp[16];
-		uint32_t at = 0;
-
-		if (np_host->clock_now(ctx, &now) != 0) {
-			break;
-		}
-
-		at = z_append_u32(stamp, at, sizeof(stamp), now.hour);
-		at = at != 0 ? z_append(stamp, at, sizeof(stamp), ":") : 0;
-		at = at != 0 ? z_append_pad(stamp, at, sizeof(stamp), now.minute, 2) : 0;
-		if (at != 0) {
-			np_host->text_insert(ctx, st->text, stamp);
-			mark_dirty(ctx, st, 1);
-		}
-		break;
-	}
-
 	default:
 		break;
 	}

@@ -10,7 +10,7 @@
  * no Zephyr; it does not know what a filesystem or a font or a touch panel is.
  * The list of things milestone K had to build for this file to be possible is
  * most of milestone K: multi-file zapps, a key path, an on-screen keyboard, a
- * text widget, a clipboard, menus, dialogs and a clock.
+ * text widget, a clipboard, menus and dialogs.
  *
  * What is NOT here, and is not an oversight:
  *
@@ -19,6 +19,13 @@
  *   - Find, Replace, word-wrap toggle, print, page setup. Each needs a dialog
  *     or a service that does not exist yet; a greyed-out Search menu would be
  *     a lie about how finished this is.
+ *   - Time/Date (F5 in the original). It went in for fidelity and came back out
+ *     for honesty: there is no date anywhere in the ABI, so it stamped only
+ *     half of what the original did, and the time it stamped is a fiction --
+ *     qemu_cortex_a53 has no RTC, so clock_now() counts up from a hardcoded
+ *     start. A made-up time in a corner of the taskbar is a nicety; a made-up
+ *     time written into a document the user then saves is a small lie with a
+ *     long life.
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -83,7 +90,6 @@ static void build_menus(zd_zapp_ctx_t ctx, struct np_state *st)
 	np_host->menu_add_item(ctx, st->edit_menu, "Delete", NP_EDIT_DELETE);
 	np_host->menu_add_separator(ctx, st->edit_menu);
 	np_host->menu_add_item(ctx, st->edit_menu, "Select All", NP_EDIT_SELALL);
-	np_host->menu_add_item(ctx, st->edit_menu, "Time", NP_EDIT_TIME);
 }
 
 static int notepad_init(zd_zapp_ctx_t ctx, const struct zd_host_api *api)
@@ -177,8 +183,6 @@ static void notepad_event(zd_zapp_ctx_t ctx, const struct zd_event *ev)
 		accel = np_accelerator(ev->key.code, ev->key.unicode, ev->key.mods);
 		if (accel != 0) {
 			np_command(ctx, st, accel);
-		} else if (ev->key.code == ZD_KEY_F(5)) {
-			np_command(ctx, st, NP_EDIT_TIME); /* F5, as it always was */
 		}
 		break;
 

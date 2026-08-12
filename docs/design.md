@@ -1087,9 +1087,14 @@ actually wanted rather than imagined:
 - **Find and Replace, word wrap toggle, print.** Each needs a dialog or a service
   that does not exist; a greyed-out Search menu would misrepresent how finished
   this is.
-- **A real RTC in the ABI.** `clock_now()` reports the desktop's fiction. The
-  call is the right shape; only its implementation is a lie, and only on boards
-  with no clock.
+- **A real clock, and a date.** `clock_now()` reports the desktop's fiction --
+  the call is the right shape, only its implementation is a lie, and only on
+  boards with no RTC -- and there is no date in the ABI at all. Together those
+  are why **Notepad's Time/Date went in for fidelity and came straight back
+  out**: it stamped half of what the original stamped, and stamped a made-up
+  time into a document the user then saves. A made-up time in a corner of the
+  taskbar is a nicety; the same number written into a file is a small lie with a
+  long life. Worth having when both halves are real.
 - **Navigation in the file picker.** It lists one well-known directory and shows
   files only.
 - **A keyboard layout that is not US.** `input/keymap.c` says so at the top.
