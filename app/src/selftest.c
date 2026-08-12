@@ -19,10 +19,13 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 
+#include <zd/zapp_abi.h>
+
 #include "selftest.h"
 #include "host/fs_api.h"
 #include "host/fs_shim.h"
 #include "host/storage.h"
+#include "host/text_api.h"
 #include "wm/handle.h"
 #include "wm/wm.h"
 
@@ -389,6 +392,105 @@ static void test_wm(struct zd_wm *wm)
 	check(stacked(wm) == before, "and leaves nothing behind in the stack");
 }
 
+/*
+ * The text widget: handles, byte positions, selection, and the key routing.
+ *
+ * Owner-less windows again, with a fabricated instance pointer standing in for
+ * a zapp. That is safe here for one specific reason worth stating: a
+ * desktop-internal window has handle == 0, and text_api.c refuses to dispatch
+ * ZD_EV_TEXT_CHANGED for one -- so the fake owner is never dereferenced.
+ */
+static void test_text(struct zd_wm *wm)
+{
+	struct zd_zapp_instance *mine = (struct zd_zapp_instance *)0xa1;
+	struct zd_client *client;
+	lv_area_t want = { .x1 = 4, .y1 = 4, .x2 = 4 + 200 - 1, .y2 = 4 + 120 - 1 };
+	struct zd_rect geom = { .x = 0, .y = 0, .w = 180, .h = 80 };
+	uint32_t before = zd_handle_live_count();
+	uintptr_t text;
+	char buf[32];
+	uint32_t from;
+	uint32_t to;
+
+	client = zd_wm_window_create(wm, "selftest text", &want);
+	if (client == NULL) {
+		check(false, "a window for the text checks could be created");
+		return;
+	}
+
+	text = zd_text_create(mine, client, &geom, 0);
+	check(text != 0, "a text widget can be created");
+	check(client->text_focus != NULL,
+	      "the first editable widget in a window takes the caret");
+
+	check(zd_text_set_text(mine, text, "hello world") == 0, "set_text succeeds");
+	check(zd_text_get_length(mine, text) == 11, "get_length counts bytes");
+
+	check(zd_text_get_text(mine, text, 6, buf, sizeof(buf)) == 5 &&
+		      strcmp(buf, "world") == 0,
+	      "get_text reads from a byte offset");
+	check(zd_text_get_text(mine, text, 11, buf, sizeof(buf)) == 0,
+	      "get_text at the end returns 0, not an error");
+	check(zd_text_get_text(mine, text, 0, buf, 4) == 3 && strcmp(buf, "hel") == 0,
+	      "get_text is allowed to be short and terminates what it wrote");
+
+	check(zd_text_set_cursor(mine, text, 5) == 0 &&
+		      zd_text_get_cursor(mine, text) == 5,
+	      "the caret round-trips through a byte offset");
+
+	check(zd_text_get_selection(mine, text, &from, &to) == 0,
+	      "nothing is selected to begin with");
+	check(zd_text_select(mine, text, 0, 5) == 0 &&
+		      zd_text_get_selection(mine, text, &from, &to) == 1 && from == 0 &&
+		      to == 5,
+	      "a selection round-trips through byte offsets");
+
+	check(zd_text_delete_selection(mine, text) == 1 &&
+		      zd_text_get_length(mine, text) == 6,
+	      "deleting the selection removes exactly it");
+	check(zd_text_delete_selection(mine, text) == 0,
+	      "deleting nothing reports that it deleted nothing");
+
+	/* Keys reach the widget only through the WM's routing, so drive it the
+	 * way a real key press does rather than calling the widget directly.
+	 */
+	zd_wm_focus(wm, client);
+	zd_text_set_cursor(mine, text, 0);
+	zd_wm_key(wm, ZD_KEY_CHAR, 'X', 0);
+	check(zd_text_get_length(mine, text) == 7, "a typed character reaches the widget");
+
+	check(!zd_text_on_client_key(client, ZD_KEY_ESCAPE, 0, 0),
+	      "Escape is declined, so the zapp gets it");
+	check(!zd_text_on_client_key(client, ZD_KEY_F(1), 0, 0),
+	      "a function key is declined too");
+
+	zd_text_select(mine, text, 0, 3);
+	zd_wm_key(wm, ZD_KEY_CHAR, 'Q', 0);
+	check(zd_text_get_length(mine, text) == 5,
+	      "typing over a selection replaces it");
+
+	/* CTRL must never reach the caret, or Ctrl+S types an S. */
+	{
+		int len = zd_text_get_length(mine, text);
+
+		zd_wm_key(wm, ZD_KEY_CHAR, 's', ZD_MOD_CTRL);
+		check(zd_text_get_length(mine, text) == len,
+		      "a key held with CTRL does not reach the text widget");
+	}
+
+	check(zd_text_live_count() == 1, "one text widget is live");
+
+	/* Closing the window must take the widget and its handle with it: the
+	 * only cleanup path is LVGL's DELETE event, so this is the check that
+	 * the path is actually wired.
+	 */
+	zd_wm_window_close(client);
+	zd_wm_reap(wm);
+	check(zd_text_live_count() == 0, "closing the window destroys its text widget");
+	check(zd_handle_live_count() == before,
+	      "and releases every handle the window held");
+}
+
 void zd_selftest_run(const struct zd_session *session)
 {
 	failures = 0;
@@ -409,6 +511,7 @@ void zd_selftest_run_wm(struct zd_wm *wm)
 	failures = 0;
 
 	test_wm(wm);
+	test_text(wm);
 
 	if (failures == 0) {
 		LOG_INF("selftest (wm): all checks passed");

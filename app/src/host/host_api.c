@@ -19,6 +19,7 @@
 #include "fs_api.h"
 #include "host_api.h"
 #include "session.h"
+#include "text_api.h"
 #include "../loader/zapp_instance.h"
 #include "../wm/handle.h"
 #include "../wm/wm.h"
@@ -211,6 +212,113 @@ static int api_label_set_text(zd_zapp_ctx_t ctx, zd_label_t label, const char *t
 
 	lv_label_set_text(obj, text != NULL ? text : "");
 	return 0;
+}
+
+/* --- text ------------------------------------------------------------------- */
+
+/*
+ * Thin forwarders again, in the shape the storage entry points established:
+ * resolve the caller, hand off. Everything interesting -- the handle registry,
+ * the byte/character conversion, the suppression of self-inflicted change
+ * events -- is in text_api.c, so there is one place to read and one to get
+ * wrong.
+ */
+
+static zd_text_t api_text_create(zd_zapp_ctx_t ctx, zd_window_t win,
+				 const struct zd_rect *geom, uint32_t flags)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+	struct zd_client *client = window_of(ctx, win);
+
+	if (inst == NULL || client == NULL || geom == NULL) {
+		return NULL;
+	}
+
+	return (zd_text_t)zd_text_create(inst, client, geom, flags);
+}
+
+static void api_text_destroy(zd_zapp_ctx_t ctx, zd_text_t text)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	if (inst != NULL) {
+		zd_text_destroy(inst, (uintptr_t)text);
+	}
+}
+
+static int api_text_set_text(zd_zapp_ctx_t ctx, zd_text_t text, const char *s)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_text_set_text(inst, (uintptr_t)text, s) : -EINVAL;
+}
+
+static int api_text_get_text(zd_zapp_ctx_t ctx, zd_text_t text, uint32_t from, char *buf,
+			     uint32_t len)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_text_get_text(inst, (uintptr_t)text, from, buf, len)
+			    : -EINVAL;
+}
+
+static int api_text_get_length(zd_zapp_ctx_t ctx, zd_text_t text)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_text_get_length(inst, (uintptr_t)text) : -EINVAL;
+}
+
+static int api_text_insert(zd_zapp_ctx_t ctx, zd_text_t text, const char *s)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_text_insert(inst, (uintptr_t)text, s) : -EINVAL;
+}
+
+static int api_text_set_geometry(zd_zapp_ctx_t ctx, zd_text_t text,
+				 const struct zd_rect *geom)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_text_set_geometry(inst, (uintptr_t)text, geom) : -EINVAL;
+}
+
+static int api_text_set_cursor(zd_zapp_ctx_t ctx, zd_text_t text, uint32_t pos)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_text_set_cursor(inst, (uintptr_t)text, pos) : -EINVAL;
+}
+
+static int api_text_get_cursor(zd_zapp_ctx_t ctx, zd_text_t text)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_text_get_cursor(inst, (uintptr_t)text) : -EINVAL;
+}
+
+static int api_text_get_selection(zd_zapp_ctx_t ctx, zd_text_t text, uint32_t *from,
+				  uint32_t *to)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_text_get_selection(inst, (uintptr_t)text, from, to)
+			    : -EINVAL;
+}
+
+static int api_text_select(zd_zapp_ctx_t ctx, zd_text_t text, uint32_t from, uint32_t to)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_text_select(inst, (uintptr_t)text, from, to) : -EINVAL;
+}
+
+static int api_text_delete_selection(zd_zapp_ctx_t ctx, zd_text_t text)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_text_delete_selection(inst, (uintptr_t)text) : -EINVAL;
 }
 
 /* --- filesystem and misc ---------------------------------------------------- */
@@ -416,7 +524,13 @@ static void *api_unsafe_lvgl_content(zd_zapp_ctx_t ctx, zd_window_t win)
 	.fs_readdir = api_fs_readdir, .fs_closedir = api_fs_closedir,                       \
 	.fs_stat = api_fs_stat, .fs_mkdir = api_fs_mkdir, .fs_unlink = api_fs_unlink,       \
 	.fs_rename = api_fs_rename, .window_minimize = api_window_minimize,                 \
-	.window_restore = api_window_restore
+	.window_restore = api_window_restore, .text_create = api_text_create,               \
+	.text_destroy = api_text_destroy, .text_set_text = api_text_set_text,               \
+	.text_get_text = api_text_get_text, .text_get_length = api_text_get_length,         \
+	.text_insert = api_text_insert, .text_set_geometry = api_text_set_geometry,         \
+	.text_set_cursor = api_text_set_cursor, .text_get_cursor = api_text_get_cursor,     \
+	.text_get_selection = api_text_get_selection, .text_select = api_text_select,       \
+	.text_delete_selection = api_text_delete_selection
 
 static const struct zd_host_api host_api_untrusted = {
 	ZD_HOST_API_COMMON,

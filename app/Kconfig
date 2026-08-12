@@ -43,6 +43,35 @@ config ZD_TASKLIST_BTN_MAX_W
 	  the right one; a row that refused to shrink would instead push windows
 	  off the end of the strip where they cannot be reached at all.
 
+config ZD_TEXT_MAX
+	int "Largest document a text widget will hold (bytes)"
+	default 4096
+	help
+	  The cap on one editable field, enforced by the widget itself, and the
+	  size of the single scratch buffer that makes deleting a selection one
+	  pass instead of one memmove per character.
+
+	  A bounded editor is not an apology. Notepad 1.0 topped out somewhere
+	  near 54 KB and said so; what matters is that the limit is stated and
+	  the zapp is told when a file will not fit, rather than the document
+	  being silently truncated.
+
+config ZD_MAX_TEXTS
+	int "Maximum simultaneously live text widgets, desktop-wide"
+	default 8
+	help
+	  Fixed array, for the reason windows and open files are: a leak should
+	  hit a wall that names itself rather than grow the heap quietly.
+
+config ZD_TEXT_PAGE_LINES
+	int "Lines Page Up and Page Down move the caret"
+	default 8
+	help
+	  A real editor pages by the height of the visible area. A text widget
+	  has no cheap way to ask LVGL how many lines that is right now, so this
+	  is a fixed count -- close enough on every panel this project targets,
+	  and honest about being a constant.
+
 config ZD_FS_ROOT
 	string "Mount point of the app filesystem"
 	default "/RAM:"

@@ -87,6 +87,17 @@ struct zd_client {
 	lv_obj_t *content; /**< the app's area */
 	lv_obj_t *grip;    /**< resize handle */
 
+	/**
+	 * The text widget with the caret in this window, or NULL.
+	 *
+	 * Keyboard focus *within* a window, which is the same kind of state as
+	 * focus between windows and so lives in the same struct. wm/keys.c
+	 * consults it; host/text_api.c sets it. The WM does not know what an
+	 * lv_textarea is and does not need to -- it only ever asks the hook
+	 * whether something consumed the key.
+	 */
+	lv_obj_t *text_focus;
+
 	/* WM-authoritative geometry. LVGL follows this, never the reverse. */
 	lv_area_t geom;
 	char title[ZD_TITLE_MAX];

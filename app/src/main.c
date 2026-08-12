@@ -18,6 +18,7 @@
 #include "input/keys.h"
 #include "host/session.h"
 #include "host/storage.h"
+#include "host/text_api.h"
 #include "loader/zapp_instance.h"
 #include "loader/zapp_loader.h"
 #include "loader/seed.h"
@@ -114,6 +115,7 @@ int main(void)
 	wm.on_client_resized = zd_zapp_on_client_resized;
 	wm.on_client_minimized = zd_zapp_on_client_minimized;
 	wm.on_client_key = zd_zapp_on_client_key;
+	wm.on_client_text_key = zd_text_on_client_key;
 	wm.on_client_close_request = zd_zapp_on_client_close_request;
 	zd_keys_init(&wm);
 	zd_tasklist_init(layers.panel, &wm);

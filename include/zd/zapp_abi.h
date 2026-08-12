@@ -51,6 +51,8 @@ extern "C" {
 typedef struct zd_zapp_ctx *zd_zapp_ctx_t;
 typedef struct zd_window *zd_window_t;
 typedef struct zd_label *zd_label_t;
+/** An editable multi-line text field. Added in 0.5. */
+typedef struct zd_text *zd_text_t;
 /** An open file. */
 typedef struct zd_file *zd_file_t;
 /**
@@ -157,6 +159,13 @@ struct zd_dirent {
 #define ZD_MOD_CTRL  (1u << 1)
 #define ZD_MOD_ALT   (1u << 2)
 
+/* --- text widgets ----------------------------------------------------------- */
+
+/** Not editable and never takes the caret. */
+#define ZD_TEXT_READONLY (1u << 0)
+/** One line: Enter is not inserted, and the field never wraps. */
+#define ZD_TEXT_ONE_LINE (1u << 1)
+
 /* --- events --------------------------------------------------------------- */
 
 /*
@@ -225,6 +234,19 @@ enum zd_event_type {
 	 */
 	ZD_EV_MINIMIZED,
 	ZD_EV_RESTORED,
+
+	/* --- ABI 0.5 ------------------------------------------------------ */
+
+	/**
+	 * The USER changed a text widget's contents, named in ev->text.text.
+	 *
+	 * Not sent for edits the zapp itself made through text_set_text(),
+	 * text_insert(), text_paste() and the rest -- you already know about
+	 * those, and being re-entered from inside your own host call is a trap
+	 * rather than a service. This event means exactly what a dirty flag
+	 * wants it to mean.
+	 */
+	ZD_EV_TEXT_CHANGED,
 };
 
 struct zd_event {
@@ -253,6 +275,10 @@ struct zd_event {
 			int16_t w;
 			int16_t h;
 		} resize;
+		/** ZD_EV_TEXT_CHANGED. Added in 0.5. */
+		struct {
+			zd_text_t text;
+		} text;
 	};
 };
 
@@ -414,6 +440,57 @@ struct zd_host_api {
 	 */
 	int (*window_minimize)(zd_zapp_ctx_t ctx, zd_window_t win);
 	int (*window_restore)(zd_zapp_ctx_t ctx, zd_window_t win);
+
+	/* --- ABI 0.5: editable text ---------------------------------------- */
+
+	/*
+	 * A real text field: caret, word wrap, scrolling, click to position,
+	 * drag to select. label_create() is for showing a string; this is for
+	 * editing one, and it is what makes a text editor possible without the
+	 * zapp reimplementing an editor.
+	 *
+	 * POSITIONS ARE BYTE OFFSETS, everywhere -- cursor, selection, the
+	 * offset into text_get_text(). Not character indices. Bytes are what a
+	 * zapp has when it reads a file, and converting is the desktop's job.
+	 *
+	 * A widget belongs to the window it was created in and dies with it.
+	 * Destroying the window destroys the widget; the handle then stops
+	 * resolving, as every stale handle does.
+	 */
+	zd_text_t (*text_create)(zd_zapp_ctx_t ctx, zd_window_t win,
+				 const struct zd_rect *geom, uint32_t flags);
+	void (*text_destroy)(zd_zapp_ctx_t ctx, zd_text_t text);
+
+	int (*text_set_text)(zd_zapp_ctx_t ctx, zd_text_t text, const char *s);
+	/**
+	 * Copy out from byte offset @p from.
+	 *
+	 * SHORT BY CONTRACT, exactly like fs_read and for the same reason: a
+	 * document outgrows any single call worth making on the desktop thread.
+	 * Loop until it returns 0.
+	 *
+	 * @return bytes written to @p buf excluding the terminator, 0 at the
+	 *         end of the text, or a negative errno.
+	 */
+	int (*text_get_text)(zd_zapp_ctx_t ctx, zd_text_t text, uint32_t from, char *buf,
+			     uint32_t len);
+	/** @return length in bytes, excluding the terminator. */
+	int (*text_get_length)(zd_zapp_ctx_t ctx, zd_text_t text);
+	/** Insert at the caret, replacing the selection if there is one. */
+	int (*text_insert)(zd_zapp_ctx_t ctx, zd_text_t text, const char *s);
+	int (*text_set_geometry)(zd_zapp_ctx_t ctx, zd_text_t text,
+				 const struct zd_rect *geom);
+
+	int (*text_set_cursor)(zd_zapp_ctx_t ctx, zd_text_t text, uint32_t pos);
+	/** @return the caret's byte offset, or a negative errno. */
+	int (*text_get_cursor)(zd_zapp_ctx_t ctx, zd_text_t text);
+	/** @return 1 with @p from and @p to filled, 0 if nothing is selected. */
+	int (*text_get_selection)(zd_zapp_ctx_t ctx, zd_text_t text, uint32_t *from,
+				  uint32_t *to);
+	/** Select a byte range. from >= to clears the selection. */
+	int (*text_select)(zd_zapp_ctx_t ctx, zd_text_t text, uint32_t from, uint32_t to);
+	/** @return 1 if something was deleted, 0 if nothing was selected. */
+	int (*text_delete_selection)(zd_zapp_ctx_t ctx, zd_text_t text);
 };
 
 /* --- the zapp's side ------------------------------------------------------- */
