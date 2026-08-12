@@ -26,10 +26,29 @@ extern "C" {
 #endif
 
 #define ZD_ABI_MAJOR 0
-#define ZD_ABI_MINOR 5
+#define ZD_ABI_MINOR 6
 
-/** Longest absolute path the desktop will hand back or accept. */
-#define ZD_PATH_MAX 96
+/**
+ * Longest absolute path the desktop will hand back or accept.
+ *
+ * A TUNING KNOB, NOT AN ABI MEMBER, and the difference is worth stating because
+ * this is the second time the number has moved. It appears in no struct in this
+ * header -- only here -- and every host call that writes a path into a caller's
+ * buffer is told that buffer's size (path_resolve, dialog_get_path,
+ * get_launch_arg) and promises -ENOSPC rather than half a path. So raising it
+ * moves no offset and breaks no layout: the worst that happens to a zapp built
+ * against the older value is -ENOSPC for a path that could not have existed
+ * before the change, which is the failure it already handles.
+ *
+ * Keep it that way. The moment something in this header writes a path into a
+ * fixed array a zapp declares, the knob becomes a member and can never move
+ * again -- which is exactly what happened to ZD_NAME_MAX below.
+ *
+ * Raised from 96 in 0.6, because a file browser is the first thing that walks
+ * directories: "/RAM:/home/user" plus a 64-byte FATFS long name is already 80,
+ * so 96 could not hold two levels.
+ */
+#define ZD_PATH_MAX 192
 
 /** Longest zapp display name. */
 #define ZD_ZAPP_NAME_MAX 24
@@ -50,6 +69,15 @@ extern "C" {
  * silently hand back a truncated name that cannot be opened. FATFS with long
  * filenames yields 64 on this tree; fs_api.c BUILD_ASSERTs the relationship, so
  * a target configured for longer names fails to build rather than to work.
+ *
+ * FROZEN, unlike ZD_PATH_MAX above, and this is the worked example of why that
+ * one is careful. This value is the array bound inside struct zd_dirent, which
+ * the host fills through a pointer the zapp supplied -- and fs_readdir has no
+ * length parameter to check it against. A zapp built against 0.5 has an 88-byte
+ * dirent on its stack; a host built with a larger value writes past the end of
+ * it. That is a stack smash, it happens on a correctly-versioned zapp, and no
+ * version gate can catch it, because the sizes never meet. Raising this is a
+ * major bump. Do not.
  */
 #define ZD_NAME_MAX 80
 
