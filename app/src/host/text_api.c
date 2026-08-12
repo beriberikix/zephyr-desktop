@@ -50,6 +50,8 @@ struct text_rec {
 
 static bool drop_selection(struct text_rec *rec);
 
+static bool drop_selection_obj(lv_obj_t *ta);
+
 static struct text_rec recs[CONFIG_ZD_MAX_TEXTS];
 static uint32_t live_texts;
 
@@ -389,9 +391,9 @@ int zd_text_get_cursor(struct zd_zapp_instance *owner, uintptr_t handle)
 }
 
 /** Selected range in characters. @return false if nothing is selected. */
-static bool selection_chars(const struct text_rec *rec, uint32_t *from, uint32_t *to)
+static bool selection_of(lv_obj_t *ta, uint32_t *from, uint32_t *to)
 {
-	lv_obj_t *label = lv_textarea_get_label(rec->obj);
+	lv_obj_t *label = lv_textarea_get_label(ta);
 	uint32_t a = lv_label_get_text_selection_start(label);
 	uint32_t b = lv_label_get_text_selection_end(label);
 
@@ -402,6 +404,11 @@ static bool selection_chars(const struct text_rec *rec, uint32_t *from, uint32_t
 	*from = MIN(a, b);
 	*to = MAX(a, b);
 	return true;
+}
+
+static bool selection_chars(const struct text_rec *rec, uint32_t *from, uint32_t *to)
+{
+	return selection_of(rec->obj, from, to);
 }
 
 int zd_text_get_selection(struct zd_zapp_instance *owner, uintptr_t handle, uint32_t *from,
@@ -458,7 +465,7 @@ int zd_text_select(struct zd_zapp_instance *owner, uintptr_t handle, uint32_t fr
  * the whole tail each time, so clearing a select-all over a full document would
  * be O(n^2) and measurable on a 240 MHz part. This is one pass.
  */
-static bool drop_selection(struct text_rec *rec)
+static bool drop_selection_obj(lv_obj_t *ta)
 {
 	uint32_t from_char;
 	uint32_t to_char;
@@ -467,11 +474,14 @@ static bool drop_selection(struct text_rec *rec)
 	uint32_t to;
 	uint32_t tail;
 
-	if (!selection_chars(rec, &from_char, &to_char)) {
+	if (!selection_of(ta, &from_char, &to_char)) {
 		return false;
 	}
 
-	s = text_of(rec);
+	s = lv_textarea_get_text(ta);
+	if (s == NULL) {
+		return false;
+	}
 	from = byte_of(s, from_char);
 	to = byte_of(s, to_char);
 	tail = (uint32_t)strlen(s) - to;
@@ -484,10 +494,15 @@ static bool drop_selection(struct text_rec *rec)
 	memcpy(edit_buf + from, s + to, tail);
 	edit_buf[from + tail] = '\0';
 
-	lv_textarea_clear_selection(rec->obj);
-	lv_textarea_set_text(rec->obj, edit_buf);
-	lv_textarea_set_cursor_pos(rec->obj, (int32_t)from_char);
+	lv_textarea_clear_selection(ta);
+	lv_textarea_set_text(ta, edit_buf);
+	lv_textarea_set_cursor_pos(ta, (int32_t)from_char);
 	return true;
+}
+
+static bool drop_selection(struct text_rec *rec)
+{
+	return drop_selection_obj(rec->obj);
 }
 
 int zd_text_delete_selection(struct zd_zapp_instance *owner, uintptr_t handle)
@@ -620,31 +635,12 @@ static uint32_t line_end(const char *s, uint32_t at)
 	return at;
 }
 
-static void move_to_byte(struct text_rec *rec, uint32_t at)
+bool zd_text_key_obj(lv_obj_t *ta, uint32_t code, uint32_t unicode, uint16_t mods)
 {
-	lv_textarea_set_cursor_pos(rec->obj, (int32_t)char_of(text_of(rec), at));
-}
-
-bool zd_text_on_client_key(struct zd_client *client, uint32_t code, uint32_t unicode,
-			   uint16_t mods)
-{
-	lv_obj_t *ta = client->text_focus;
-	struct text_rec *rec = NULL;
 	const char *s;
 	uint32_t at;
 
 	if (ta == NULL) {
-		return false;
-	}
-
-	for (size_t i = 0; i < ARRAY_SIZE(recs); i++) {
-		if (recs[i].used && recs[i].obj == ta) {
-			rec = &recs[i];
-			break;
-		}
-	}
-
-	if (rec == NULL) {
 		return false;
 	}
 
@@ -654,50 +650,53 @@ bool zd_text_on_client_key(struct zd_client *client, uint32_t code, uint32_t uni
 		 * that on its own, and an editor where it does not is wrong in
 		 * a way people notice immediately.
 		 */
-		drop_selection(rec);
-		lv_textarea_add_char(rec->obj, unicode);
+		drop_selection_obj(ta);
+		lv_textarea_add_char(ta, unicode);
 		return true;
 
 	case ZD_KEY_ENTER:
-		drop_selection(rec);
-		lv_textarea_add_char(rec->obj, '\n');
+		if (lv_textarea_get_one_line(ta)) {
+			return false; /* a single-line field means it as "done" */
+		}
+		drop_selection_obj(ta);
+		lv_textarea_add_char(ta, '\n');
 		return true;
 
 	case ZD_KEY_TAB:
-		drop_selection(rec);
-		lv_textarea_add_text(rec->obj, "    ");
+		drop_selection_obj(ta);
+		lv_textarea_add_text(ta, "    ");
 		return true;
 
 	case ZD_KEY_BACKSPACE:
-		if (!drop_selection(rec)) {
-			lv_textarea_delete_char(rec->obj);
+		if (!drop_selection_obj(ta)) {
+			lv_textarea_delete_char(ta);
 		}
 		return true;
 
 	case ZD_KEY_DELETE:
-		if (!drop_selection(rec)) {
-			lv_textarea_delete_char_forward(rec->obj);
+		if (!drop_selection_obj(ta)) {
+			lv_textarea_delete_char_forward(ta);
 		}
 		return true;
 
 	case ZD_KEY_LEFT:
-		lv_textarea_clear_selection(rec->obj);
-		lv_textarea_cursor_left(rec->obj);
+		lv_textarea_clear_selection(ta);
+		lv_textarea_cursor_left(ta);
 		return true;
 
 	case ZD_KEY_RIGHT:
-		lv_textarea_clear_selection(rec->obj);
-		lv_textarea_cursor_right(rec->obj);
+		lv_textarea_clear_selection(ta);
+		lv_textarea_cursor_right(ta);
 		return true;
 
 	case ZD_KEY_UP:
-		lv_textarea_clear_selection(rec->obj);
-		lv_textarea_cursor_up(rec->obj);
+		lv_textarea_clear_selection(ta);
+		lv_textarea_cursor_up(ta);
 		return true;
 
 	case ZD_KEY_DOWN:
-		lv_textarea_clear_selection(rec->obj);
-		lv_textarea_cursor_down(rec->obj);
+		lv_textarea_clear_selection(ta);
+		lv_textarea_cursor_down(ta);
 		return true;
 
 	case ZD_KEY_HOME:
@@ -705,36 +704,45 @@ bool zd_text_on_client_key(struct zd_client *client, uint32_t code, uint32_t uni
 		/* Line-scoped, the way an editor's are. LVGL only offers
 		 * document start and end, which is what Ctrl+Home and Ctrl+End
 		 * mean -- so both are here rather than one being borrowed for
-		 * the other.
+		 * the other. ALT stands in for CTRL because CTRL never reaches
+		 * a text widget at all; see wm/keys.c.
 		 */
-		lv_textarea_clear_selection(rec->obj);
-		s = text_of(rec);
-		at = byte_of(s, lv_textarea_get_cursor_pos(rec->obj));
+		lv_textarea_clear_selection(ta);
+		s = lv_textarea_get_text(ta);
+		s = s != NULL ? s : "";
+		at = byte_of(s, lv_textarea_get_cursor_pos(ta));
 
 		if (mods & ZD_MOD_ALT) {
-			move_to_byte(rec, code == ZD_KEY_HOME ? 0 : (uint32_t)strlen(s));
+			at = code == ZD_KEY_HOME ? 0 : (uint32_t)strlen(s);
 		} else {
-			move_to_byte(rec, code == ZD_KEY_HOME ? line_start(s, at)
-							      : line_end(s, at));
+			at = code == ZD_KEY_HOME ? line_start(s, at) : line_end(s, at);
 		}
+
+		lv_textarea_set_cursor_pos(ta, (int32_t)char_of(s, at));
 		return true;
 
 	case ZD_KEY_PAGE_UP:
 	case ZD_KEY_PAGE_DOWN:
-		lv_textarea_clear_selection(rec->obj);
+		lv_textarea_clear_selection(ta);
 		for (int i = 0; i < CONFIG_ZD_TEXT_PAGE_LINES; i++) {
 			if (code == ZD_KEY_PAGE_UP) {
-				lv_textarea_cursor_up(rec->obj);
+				lv_textarea_cursor_up(ta);
 			} else {
-				lv_textarea_cursor_down(rec->obj);
+				lv_textarea_cursor_down(ta);
 			}
 		}
 		return true;
 
 	default:
 		/* Escape and the function keys mean nothing to a text field and
-		 * everything to the zapp that owns it.
+		 * everything to whoever owns it.
 		 */
 		return false;
 	}
+}
+
+bool zd_text_on_client_key(struct zd_client *client, uint32_t code, uint32_t unicode,
+			   uint16_t mods)
+{
+	return zd_text_key_obj(client->text_focus, code, unicode, mods);
 }

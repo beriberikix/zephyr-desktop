@@ -93,6 +93,16 @@ int zd_text_paste(struct zd_zapp_instance *owner, uintptr_t handle);
 bool zd_text_on_client_key(struct zd_client *client, uint32_t code, uint32_t unicode,
 			   uint16_t mods);
 
+/**
+ * @brief Apply a key to a bare lv_textarea.
+ *
+ * The editing behaviour without the handle, the ownership check or the change
+ * event, for desktop-owned fields that are not a zapp's -- the filename box in
+ * the save dialog is the only one so far. Exported so a second implementation
+ * of "what Backspace does" cannot drift away from the first.
+ */
+bool zd_text_key_obj(lv_obj_t *ta, uint32_t code, uint32_t unicode, uint16_t mods);
+
 /** Live text widgets, desktop-wide. For leak assertions. */
 uint32_t zd_text_live_count(void);
 

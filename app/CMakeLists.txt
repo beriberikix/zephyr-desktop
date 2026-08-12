@@ -45,6 +45,7 @@ target_sources(app PRIVATE
   src/shell/taskbar.c
   src/shell/launcher.c
   src/shell/tasklist.c
+  src/shell/dialog.c
   src/host/session.c
   src/host/storage.c
   src/host/fs_shim.c

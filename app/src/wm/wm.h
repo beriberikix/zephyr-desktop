@@ -190,6 +190,13 @@ struct zd_wm {
 	void (*on_client_key)(struct zd_client *client, uint32_t code, uint32_t unicode,
 			      uint16_t mods);
 
+	/* Offered every key press before anything else, so a modal surface can
+	 * take the keyboard. Returning true means "consumed"; nothing else
+	 * sees it, including the focused window. This is what modal means for
+	 * a keyboard, and it is the only hook that fires with no client at all.
+	 */
+	bool (*on_key_grab)(uint32_t code, uint32_t unicode, uint16_t mods);
+
 	/* Offered a key press BEFORE on_client_key, so a focused text widget
 	 * can swallow ordinary typing. Returning true means "consumed"; the
 	 * zapp is then not told, exactly as it is not told about the pointer

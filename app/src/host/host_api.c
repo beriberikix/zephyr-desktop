@@ -23,6 +23,7 @@
 #include "text_api.h"
 #include "../chrome/menu.h"
 #include "../loader/zapp_instance.h"
+#include "../shell/dialog.h"
 #include "../wm/client.h"
 #include "../wm/handle.h"
 #include "../wm/wm.h"
@@ -390,6 +391,47 @@ static int api_window_get_content_size(zd_zapp_ctx_t ctx, zd_window_t win, int16
 	return 0;
 }
 
+/* --- dialogs ------------------------------------------------------------------ */
+
+/*
+ * A dialog belongs to the instance that asked for it, not to a window: it
+ * outlives no zapp, and if the requester dies while one is up the desktop takes
+ * it down rather than leaving a modal shade over an unclickable screen. The
+ * window is passed only so the answer's event carries a handle the zapp
+ * recognises.
+ */
+
+static int api_dialog_confirm(zd_zapp_ctx_t ctx, const char *title, const char *msg,
+			      uint32_t buttons, uint16_t id)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	if (inst == NULL) {
+		return -EINVAL;
+	}
+
+	return zd_dialog_confirm(inst, inst->wm->focused, title, msg, buttons, id);
+}
+
+static int api_dialog_file(zd_zapp_ctx_t ctx, const char *title, enum zd_dir dir,
+			   uint32_t mode, uint16_t id)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	if (inst == NULL) {
+		return -EINVAL;
+	}
+
+	return zd_dialog_file(inst, inst->wm->focused, title, dir, mode, id);
+}
+
+static int api_dialog_get_path(zd_zapp_ctx_t ctx, char *buf, uint32_t len)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_dialog_get_path(inst, buf, len) : -EINVAL;
+}
+
 /* --- clipboard --------------------------------------------------------------- */
 
 static int api_clipboard_set(zd_zapp_ctx_t ctx, const char *text, uint32_t len)
@@ -651,7 +693,9 @@ static void *api_unsafe_lvgl_content(zd_zapp_ctx_t ctx, zd_window_t win)
 	.menu_add_submenu = api_menu_add_submenu, .menu_add_item = api_menu_add_item,       \
 	.menu_add_separator = api_menu_add_separator,                                       \
 	.menu_set_item_enabled = api_menu_set_item_enabled,                                 \
-	.window_get_content_size = api_window_get_content_size
+	.window_get_content_size = api_window_get_content_size,                             \
+	.dialog_confirm = api_dialog_confirm, .dialog_file = api_dialog_file,               \
+	.dialog_get_path = api_dialog_get_path
 
 static const struct zd_host_api host_api_untrusted = {
 	ZD_HOST_API_COMMON,

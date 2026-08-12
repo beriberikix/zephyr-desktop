@@ -79,6 +79,15 @@ config ZD_MENU_MAX_ITEMS
 	  without making the record large -- each item carries its own label,
 	  because a menu outlives the string the zapp built it from.
 
+config ZD_DIALOG_LIST_MAX
+	int "Most files a file dialog will list"
+	default 32
+	help
+	  The list is built as real widgets, one per file, so the bound is a
+	  bound on LVGL objects rather than on taste. A directory with more
+	  files than this shows the first ones; there is no paging, and no
+	  navigation into subdirectories either.
+
 config ZD_CLIPBOARD_MAX
 	int "Largest thing the clipboard will hold (bytes)"
 	default 2048

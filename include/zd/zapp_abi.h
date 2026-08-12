@@ -168,6 +168,28 @@ struct zd_dirent {
 /** One line: Enter is not inserted, and the field never wraps. */
 #define ZD_TEXT_ONE_LINE (1u << 1)
 
+/* --- dialogs ---------------------------------------------------------------- */
+
+/** Which buttons a confirm dialog shows. */
+#define ZD_DLG_OK_CANCEL     0u
+#define ZD_DLG_YES_NO_CANCEL 1u
+
+/** What a file dialog is for. */
+#define ZD_DLG_OPEN 0u
+#define ZD_DLG_SAVE 1u
+
+/*
+ * What came back, in ev->dialog.result.
+ *
+ * OK and YES are the same value on purpose: they are the same answer -- the
+ * affirmative button, whatever it was labelled -- and a zapp that opened an
+ * OK/Cancel dialog should not have to remember which name to compare against.
+ */
+#define ZD_DLG_CANCEL 0
+#define ZD_DLG_OK     1
+#define ZD_DLG_YES    1
+#define ZD_DLG_NO     2
+
 /* --- events --------------------------------------------------------------- */
 
 /*
@@ -257,6 +279,18 @@ enum zd_event_type {
 	 * do.
 	 */
 	ZD_EV_MENU,
+	/**
+	 * A dialog you asked for has been answered: ev->dialog.id is the value
+	 * you passed, ev->dialog.result is one of ZD_DLG_OK / _YES / _NO /
+	 * _CANCEL.
+	 *
+	 * For a file dialog, call dialog_get_path() to find out which file --
+	 * a path does not fit in an event and does not belong in one.
+	 *
+	 * Delivered after the dialog has come down, so closing your own window
+	 * from here is safe.
+	 */
+	ZD_EV_DIALOG,
 };
 
 struct zd_event {
@@ -293,6 +327,11 @@ struct zd_event {
 		struct {
 			uint16_t id;
 		} menu;
+		/** ZD_EV_DIALOG. Added in 0.5. */
+		struct {
+			uint16_t id;
+			int16_t result;
+		} dialog;
 	};
 };
 
@@ -578,6 +617,41 @@ struct zd_host_api {
 	 */
 	int (*window_get_content_size)(zd_zapp_ctx_t ctx, zd_window_t win, int16_t *w,
 				       int16_t *h);
+
+	/* --- ABI 0.5: dialogs ---------------------------------------------- */
+
+	/*
+	 * "The text in the Untitled file has changed" and "open which file?"
+	 * are not application problems. Every zapp that edits anything needs
+	 * both, they should look the same everywhere, and the file picker has
+	 * to walk the filesystem through the session's permissions -- which is
+	 * the desktop's business and not yours.
+	 *
+	 * BOTH ARE ASYNCHRONOUS. They return as soon as the dialog is on
+	 * screen, and the answer arrives later as ZD_EV_DIALOG carrying the id
+	 * you passed. There is no modal loop: the desktop thread runs LVGL, so
+	 * blocking it to wait for a click would stop the thing being clicked
+	 * from drawing.
+	 *
+	 * Only one dialog exists at a time, desktop-wide -- asking while one is
+	 * up returns -EBUSY. It is system modal rather than application modal,
+	 * which is a simplification and the opposite of what Win95 did.
+	 *
+	 * @return 0 once it is up, or a negative errno.
+	 */
+	int (*dialog_confirm)(zd_zapp_ctx_t ctx, const char *title, const char *msg,
+			      uint32_t buttons, uint16_t id);
+	/** @param dir which well-known directory to list; there is no navigation. */
+	int (*dialog_file)(zd_zapp_ctx_t ctx, const char *title, enum zd_dir dir,
+			   uint32_t mode, uint16_t id);
+	/**
+	 * The path a file dialog produced, valid from ZD_EV_DIALOG until the
+	 * next dialog. Empty if the answer was ZD_DLG_CANCEL.
+	 *
+	 * @return its length, or -ENOSPC if @p len is too small -- never a
+	 *         truncated path, because half a path still opens something.
+	 */
+	int (*dialog_get_path)(zd_zapp_ctx_t ctx, char *buf, uint32_t len);
 };
 
 /* --- the zapp's side ------------------------------------------------------- */

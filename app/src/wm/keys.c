@@ -36,6 +36,14 @@ void zd_wm_key(struct zd_wm *wm, uint32_t code, uint32_t unicode, uint16_t mods)
 {
 	struct zd_client *client = wm->focused;
 
+	/* A modal surface takes everything, including CTRL. An accelerator that
+	 * still worked while a "save changes?" box was up would act on a window
+	 * the user cannot currently see the state of.
+	 */
+	if (wm->on_key_grab != NULL && wm->on_key_grab(code, unicode, mods)) {
+		return;
+	}
+
 	if (client == NULL || client->pending_destroy) {
 		return;
 	}

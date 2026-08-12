@@ -24,6 +24,7 @@
 #include "loader/zapp_loader.h"
 #include "loader/seed.h"
 #include "shell/desktop.h"
+#include "shell/dialog.h"
 #include "shell/launcher.h"
 #include "shell/osk.h"
 #include "shell/taskbar.h"
@@ -125,6 +126,8 @@ int main(void)
 	zd_launcher_init(&layers, &session, on_app_chosen, &wm);
 	zd_osk_init(&layers);
 	zd_menu_init(&layers);
+	zd_dialog_init(&layers, &session);
+	wm.on_key_grab = zd_dialog_key;
 	zd_selftest_run_wm(&wm);
 	zd_smoke_init(&wm, &session);
 	lvgl_unlock();
@@ -161,6 +164,7 @@ int main(void)
 		 * menu row that was clicked.
 		 */
 		zd_menu_reap();
+		zd_dialog_reap();
 
 		/* After the reaps, for the same reason the taskbar rebuild is:
 		 * it launches and closes windows, which must never happen from

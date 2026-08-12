@@ -20,6 +20,7 @@
 #include "../host/bus_arb.h"
 #include "../host/fs_api.h"
 #include "../host/host_api.h"
+#include "../shell/dialog.h"
 #include "../wm/handle.h"
 
 LOG_MODULE_DECLARE(zd_main, CONFIG_ZD_LOG_LEVEL);
@@ -481,6 +482,12 @@ static void finish_unload(struct zd_zapp_instance *inst)
 		inst->manifest->fini(&inst->ctx);
 		inst->wm->in_zapp_callback--;
 	}
+
+	/* A dialog this instance asked for has nobody left to answer it, and a
+	 * modal shade with no owner leaves the whole desktop unclickable. Take
+	 * it down before anything else goes.
+	 */
+	zd_dialog_owner_gone(inst);
 
 	/* Files first, and only after fini() -- which is a zapp's last chance to
 	 * flush. zd_handle_free_all() below only invalidates handles; on its own
