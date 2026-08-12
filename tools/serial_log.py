@@ -7,6 +7,8 @@ reader mid-session -- exactly when the interesting output starts. This reopens
 the port and keeps going.
 
     tools/serial_log.py /dev/cu.usbmodem1101 -o out.log --seconds 300 --reset
+
+SPDX-License-Identifier: Apache-2.0
 """
 import argparse
 import sys

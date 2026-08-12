@@ -6,6 +6,8 @@ to judge. This blows a region up so the retro chrome can actually be reviewed,
 and stacks multiple inputs vertically so before/after states sit side by side.
 
     tools/zoom.py -o out.png -r 0,240,80,32 -z 6 boot.png pressed.png
+
+SPDX-License-Identifier: Apache-2.0
 """
 import argparse
 import struct

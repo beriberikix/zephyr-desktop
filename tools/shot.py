@@ -15,6 +15,8 @@ checked without a human in the loop.
 Actions run in order. Every --shot writes <name>.png and reports how many pixels
 changed since the previous shot, which is usually the assertion you actually
 want ("did clicking the launcher change anything?").
+
+SPDX-License-Identifier: Apache-2.0
 """
 import argparse
 import json
