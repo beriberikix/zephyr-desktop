@@ -38,7 +38,7 @@ static void complain(zd_zapp_ctx_t ctx, const char *what, int err)
 	}
 
 	if (at != 0) {
-		(void)np_host->dialog_confirm(ctx, "Notepad", msg, ZD_DLG_OK_CANCEL, 0);
+		(void)np_host->dialog_confirm(ctx, "Notepad", msg, ZD_DLG_OK_ONLY, 0);
 	}
 
 	say(ctx, msg);

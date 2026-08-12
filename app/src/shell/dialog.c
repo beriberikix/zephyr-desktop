@@ -560,7 +560,7 @@ static void build_confirm(void)
 	int32_t h;
 	int32_t y;
 	int32_t x;
-	int n = (want.arg == ZD_DLG_YES_NO_CANCEL) ? 3 : 2;
+	int n = (want.arg == ZD_DLG_YES_NO_CANCEL) ? 3 : (want.arg == ZD_DLG_OK_ONLY) ? 1 : 2;
 
 	/* Nothing to type into a confirm box. */
 	keyboard_aside();
@@ -592,7 +592,12 @@ static void build_confirm(void)
 		x += BTN_W + BTN_GAP;
 	}
 
-	add_button(x, y, "Cancel", ZD_DLG_CANCEL);
+	/* Not on a box that is telling rather than asking. Escape and the close
+	 * box still answer CANCEL, so it stays dismissable either way.
+	 */
+	if (want.arg != ZD_DLG_OK_ONLY) {
+		add_button(x, y, "Cancel", ZD_DLG_CANCEL);
+	}
 }
 
 /* --- prompt ------------------------------------------------------------------------ */

@@ -479,6 +479,15 @@ A dialog belongs to the instance that asked for it. If that zapp dies with one
 open, the desktop takes it down — otherwise a modal shade outlives its owner and
 the whole screen stops responding.
 
+`ZD_DLG_OK_ONLY` arrived in 0.7, for **telling rather than asking**. "This
+folder is read-only" and "here is how to play" are not questions, and the Cancel
+button beside them was answering one nobody had asked. Three zapps were already
+showing messages through `ZD_DLG_OK_CANCEL` before the constant existed, which
+is what made it worth adding rather than a matter of taste. Escape and the close
+box still report `ZD_DLG_CANCEL` — a box you can only dismiss by finding the
+right button is worse than a spurious button — so a zapp showing one of these
+ignores the result entirely.
+
 `dialog_prompt()` arrived in 0.6 with the file browser. Confirm answers a
 question the desktop asked and the picker answers "which of these"; neither
 answers "what shall it be called", which is what naming a new folder needs. Its

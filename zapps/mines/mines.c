@@ -295,6 +295,13 @@ static void build_menus(zd_zapp_ctx_t ctx, struct ms_state *st)
 
 	ms_host->menu_add_separator(ctx, st->game_menu);
 	ms_host->menu_add_item(ctx, st->game_menu, "Exit", MS_GAME_EXIT);
+
+	/* The only place hold-to-flag is written down where a player will see
+	 * it. Win95 had a Help menu here too, so this is fidelity and a bug fix
+	 * at the same time.
+	 */
+	st->help_menu = ms_host->menu_add_submenu(ctx, bar, "Help");
+	ms_host->menu_add_item(ctx, st->help_menu, "How to Play", MS_HELP_HOW);
 }
 
 static void on_menu(zd_zapp_ctx_t ctx, struct ms_state *st, uint16_t id)
@@ -306,6 +313,14 @@ static void on_menu(zd_zapp_ctx_t ctx, struct ms_state *st, uint16_t id)
 
 	case MS_GAME_EXIT:
 		ms_host->window_close(ctx, st->win);
+		break;
+
+	case MS_HELP_HOW:
+		/* Telling, not asking, so no Cancel button -- see
+		 * ZD_DLG_OK_ONLY. The answer is ignored.
+		 */
+		(void)ms_host->dialog_confirm(ctx, "How to Play", MS_HELP_TEXT,
+					      ZD_DLG_OK_ONLY, 0);
 		break;
 
 	default:

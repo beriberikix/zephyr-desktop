@@ -63,7 +63,26 @@ struct ms_level {
 /* Menu command ids. Ours; the desktop only hands them back. */
 #define MS_GAME_NEW   1
 #define MS_GAME_EXIT  2
+#define MS_HELP_HOW   3
 #define MS_LEVEL_BASE 10 /**< +0 Beginner, +1 Intermediate, +2 Expert */
+
+/**
+ * @brief How to play, because otherwise nobody finds out.
+ *
+ * Flagging is a HELD press -- there is no second mouse button anywhere in this
+ * desktop, so that is the only place the second verb could go. It is also
+ * completely invisible: nothing on screen suggests it exists, and the first
+ * person handed this build asked what it meant. A gesture with no way to
+ * discover it is a gesture that is not there.
+ *
+ * One string rather than a Help zapp: the desktop already has a message box,
+ * and the whole of Minesweeper's instructions is three sentences. Kept under
+ * three wrapped lines of montserrat 12 at 272 px, which is what a confirm
+ * dialog gives.
+ */
+#define MS_HELP_TEXT                                                                       \
+	"Tap a square to uncover it. Hold a square to flag a mine. "                       \
+	"Tap the face for a new game."
 
 /** Timer ids. Also ours. */
 #define MS_TIMER_TICK 1
@@ -84,6 +103,7 @@ struct ms_state {
 	zd_grid_t board;
 	zd_grid_t panel;
 	zd_menu_t game_menu;
+	zd_menu_t help_menu;
 
 	uint8_t cols;
 	uint8_t rows;

@@ -44,7 +44,7 @@ static void complain(zd_zapp_ctx_t ctx, const char *what, int err)
 	}
 
 	if (at != 0) {
-		(void)fb_host->dialog_confirm(ctx, "Files", msg, ZD_DLG_OK_CANCEL, 0);
+		(void)fb_host->dialog_confirm(ctx, "Files", msg, ZD_DLG_OK_ONLY, 0);
 		fb_host->log(ctx, 0, msg);
 	}
 }

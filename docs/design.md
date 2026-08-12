@@ -1312,14 +1312,39 @@ pin arbiter, enough to overflow the input queue if you tap during it. Both are
 one-time. Neither is the heap. The heap was a real bug found while looking for a
 different one.
 
-**[M] On the CoreS3, Minesweeper is 9×3.** Stated rather than hidden. A cell has
-to be a fingertip, so it is `16 + CONFIG_ZD_TOUCH_SLOP_PX` = 28 px; 240 px of
-screen less the taskbar, the frame, a 30 px titlebar, a 26 px menu bar and a
-34 px counter panel leaves 112, which is three rows. Beginner clamps to 9×3 with
-3 mines, and the first click usually clears it. That is a demo, not a game. The
-same three difficulties are 9×9, 16×10 and 29×10 on a 480×272 panel, where they
-play properly. Nothing here is wrong; the screen is simply too small for this
-particular application, which is a fair thing for a desktop to be able to say.
+**[M] A gesture nobody can discover is a gesture that is not there.** The first
+person handed this build on the device asked what "hold to flag" meant. Nothing
+on screen suggested the second verb existed, and unlike a right-click there is
+no convention to fall back on — a held press is not something a player tries
+speculatively. The board can therefore only be *half* played, and the mine
+counter sits there measuring something the user has no way to change. The fix is
+a `Help → How to Play` item, which Win95 Minesweeper also had, so it is fidelity
+and a bug fix at once.
+
+It also produced the only ABI change after 0.7 was written down. An
+informational message box wants one button, and `dialog_confirm()` only offered
+OK/Cancel or Yes/No/Cancel — so a box that is *telling* the user something came
+with a Cancel that answers a question nobody asked. Notepad and the file browser
+had both been doing exactly that since 0.5 and 0.6. `ZD_DLG_OK_ONLY` is one
+appended constant with four customers on the day it landed, which is the bar
+this project has been trying to hold for ABI additions: not "this would be
+tidier", but "several things already here are working around its absence".
+
+**[M] On the CoreS3, Minesweeper is 9×3 — and that turned out to be worth
+having.** A cell has to be a fingertip, so it is `16 +
+CONFIG_ZD_TOUCH_SLOP_PX` = 28 px; 240 px of screen less the taskbar, the frame,
+a 30 px titlebar, a 26 px menu bar and a 34 px counter panel leaves 112, which
+is three rows. Beginner clamps to 9×3 with 3 mines, and the first click often
+clears it. The same three difficulties are 9×9, 16×10 and 29×10 on a 480×272
+panel.
+
+This section originally called that a demo rather than a game and asked whether
+the zapp should decline to start below some size. **Asked on the device, the
+answer was that it is useful there** — so it does not decline, the deferred
+"grid that scrolls" stays deferred, and the note here is a fact about the panel
+rather than an apology. Worth recording that the pessimistic reading was mine
+and it was wrong: the clamp behaved better in a hand than it did on paper, which
+is the whole reason `grid_fit()` picks the board instead of a constant.
 
 ---
 

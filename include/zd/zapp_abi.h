@@ -232,6 +232,19 @@ struct zd_dirent {
 /** Which buttons a confirm dialog shows. */
 #define ZD_DLG_OK_CANCEL     0u
 #define ZD_DLG_YES_NO_CANCEL 1u
+/**
+ * Just OK. For telling, not asking. Added in 0.7.
+ *
+ * "This folder is read-only" and "here is how to play" are not questions, and
+ * the Cancel button next to them was answering one nobody had asked -- cancel
+ * what? Three zapps were already showing a message that way before this
+ * existed, which is what makes it worth a constant rather than taste.
+ *
+ * Escape and the close box still report ZD_DLG_CANCEL, because a dialog you
+ * cannot dismiss without hitting the right button is worse than a spurious
+ * button. A zapp showing one of these ignores the result.
+ */
+#define ZD_DLG_OK_ONLY       2u
 
 /** What a file dialog is for. */
 #define ZD_DLG_OPEN 0u

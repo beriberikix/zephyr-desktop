@@ -713,13 +713,20 @@ a bug:
   the second boot is reads only — worth knowing before diagnosing it as
   something permanent.
 
-Still wanted from a thumb, and not answered by "it works":
+Answered on the device since:
 
-- Whether the desktop now comes up with **no on-screen keyboard** — the boot
-  checks were leaving one raised on this board since milestone K, and the fix
-  cannot be seen on QEMU.
-- Whether **hold-to-flag** survives a rolling thumb: 400 ms with a 10 px
-  movement tolerance, and no fallback gesture if it does not, because there is
-  no second button.
-- Whether a **9x3 Minesweeper** is worth having on this panel at all, or whether
-  the zapp should decline below some size and say so.
+- **The desktop comes up with no on-screen keyboard**, and the taskbar toggle
+  raises it. The boot checks had been leaving one up on this board since
+  milestone K; that is fixed, and confirmed by thumb rather than inferred.
+- **A 9x3 Minesweeper is useful on this panel.** The pessimistic reading in the
+  section above was wrong, and the zapp does not need to refuse to start on a
+  small screen.
+
+Still open, and the one that needs a deliberate try rather than a glance:
+
+- **Hold-to-flag.** 400 ms with a 10 px movement tolerance, and there is no
+  fallback gesture if a rolling thumb defeats it, because there is no second
+  button. It is also completely undiscoverable — the first person handed this
+  build asked what it meant — which is why Minesweeper now has a
+  `Help -> How to Play` box saying so. If the gesture itself turns out not to
+  work here, the fallback is a flag-mode toggle in the Game menu.
