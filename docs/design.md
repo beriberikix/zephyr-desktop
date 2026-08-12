@@ -1176,6 +1176,129 @@ time a zapp has asked for something it could not have, and it correctly gets
 inside another dialog's answer, which is the chained-dialog path K built and
 nothing had used.
 
+### M — Minesweeper, and drawing what the desktop has no widget for — **DONE (ABI 0.7)**
+
+Every zapp so far has been served by growing the ABI one widget at a time:
+Notepad wanted a text field, the browser wanted a list. That works until
+something wants a shape nobody should add to a desktop toolkit. A Minesweeper
+board is eighty-one small bevelled squares; a calculator is a keypad; a colour
+picker is a palette; a character map is a character map. None of them is a
+widget worth having, all of them are the same widget, and a zapp cannot draw any
+of them itself because it never sees an `lv_obj_t`.
+
+The second thing this milestone found had been missing since 0.1 and nobody had
+noticed: **there is a clock in the corner of Minesweeper, and nothing in the ABI
+could wake a zapp up.** Every zapp before this ran inside a callback or did not
+run.
+
+60. ✅ **`chrome/cellgrid.c`** — a rectangle of cells drawn by **one** LVGL
+    object, from an array of eight-byte records in a shared pool. Hit test by
+    division; sizes and positions from `zd_cellgrid_measure()`/`_fit()` so no
+    caller multiplies anything.
+61. ✅ **`zd_grid_t` in the ABI**, over it, in the shape `list_api.c` and
+    `text_api.c` established. Nine slots, of which three take no grid at all —
+    measure, fit and capacity are questions about the desktop, askable before
+    anything exists, because a zapp sizes its window around the answers.
+62. ✅ **`timer_start()` / `timer_stop()` / `ZD_EV_TIMER`**, on `lv_timer`, so a
+    timer dispatches from exactly where a click does and needs no new reasoning
+    about what is safe to do from it.
+63. ✅ **A ceiling on `window_set_geometry()`**, which turns out to be how a
+    zapp learns how much room it may have. See below.
+64. ✅ **`zapps/mines/`** — three difficulties clamped to what fits, mine density
+    preserved across the clamp, first click never a mine, iterative flood fill,
+    tap to uncover and hold to flag, and a panel that is itself a one-row grid:
+    three digits, a face, three digits.
+65. ✅ **Boot checks 161 → 224**, and three bugs found: see below.
+
+**[M] The safe rebuildable widget turned out to be the one with no children.**
+A zapp answers a click on a cell by rewriting the whole board, from a stack frame
+standing on the object that was clicked. That is CLAUDE.md's central hazard for
+the sixth time, and the row list only escaped it by keeping a model the loop
+re-derives. A grid escapes it by construction: one object, no children, so
+nothing exists to be destroyed under the callback and there is no reap, no dirty
+flag and no deferral. **Milestone M added a widget and did not add a customer to
+the drain list in `main()`** — the first one that did not. Worth stating as a
+design direction rather than a happy accident: when a surface is rebuilt often
+enough, drawing it yourself is cheaper *and* safer than composing it out of
+widgets, and the deferral machinery is the price of composing.
+
+The price is draw tasks. A cell is a fill, two bevel rings of four one-pixel
+rectangles, and a label — ten LVGL draw tasks, so a full board repaint is eight
+hundred. They execute and free as they are created, so nothing piles up, but
+`zd_cellgrid_set()` invalidates one cell rather than the grid, which is the
+difference between ten tasks to uncover a square and eight hundred.
+
+**[M] Long press is the second mouse button, and it arrives before the first.**
+There is no second button anywhere in this project: LVGL's pointer indev has one,
+the virtio tablet reports one, a fingertip has one. So a held press is how a cell
+gets a second verb — and `LV_EVENT_LONG_PRESSED` fires while the button is still
+down, with `LV_EVENT_CLICKED` following anyway on release. Read naively that
+flags a mine and immediately steps on it. This is the same shape as L's
+`DOUBLE_CLICKED`-before-`CLICKED` and was cheap only because L had already
+written that one down. The desktop swallows the trailing click, so the ABI can
+promise one event per gesture and no zapp has to know.
+
+**[M] A zapp has no way to ask how big the screen is, and should not.** Everything
+in this ABI is relative to a content area on purpose. But a board has to be
+sized to the room available, so something had to answer. The answer is not a new
+call: `window_set_geometry()` grew a ceiling to match the floor it has always
+had — a window taller than the usable area has its grip under the taskbar and,
+once moved, its titlebar off the top — and the ABI has always said to read the
+result back rather than assume. So "ask for 4096×4096 and see what arrives" is
+the question, correctly phrased, and what it reports is the more useful number
+anyway: not the size of the panel, but what the desktop is willing to give you.
+Growing a window can also push it off the right or bottom edge, and pulling it
+back is the caller's job, because a window may be off the edge deliberately.
+
+**[M] The sixth zapp broke the ABI version gate, exactly as K predicted, and the
+smoke test said PASS.** `CONFIG_LLEXT_HEAP_SIZE=256` stopped holding six
+extensions. `badabi` is last in the seed order, so the one that failed to load
+was the one that is *supposed* to be refused — and it went on being refused, for
+`-ENOMEM` instead of for its ABI major, while `SMOKE round 1: 5 launched, 1
+refused` printed and the run passed. Milestone K wrote down that this would
+happen and said to assert on the log line rather than the count. Nothing did.
+`smoke.c` now checks the errno: `-ENOTSUP` is the gate refusing, and anything
+else is a failure that names itself. A written-down prediction is not a check.
+
+**[M] The boot selftests had been leaving the on-screen keyboard up on every
+touch board since milestone K.** `test_text()` creates a text widget, a new text
+widget takes the caret, and taking the caret raises the keyboard on any board
+with `CONFIG_ZD_OSK_AUTO` — which only ever raises, deliberately, because
+lowering it on blur would fight the user. So the CoreS3 has been booting with a
+soft keyboard across the bottom half of a 240 px screen, put there by a test, for
+a whole milestone. It could not be seen on the development target: QEMU has slop
+0, so it has no `OSK_AUTO` and no way to reproduce it.
+
+What found it is worth keeping. **Build the QEMU image with the hardware's panel
+size and touch slop** — a scratch overlay setting `ramfb` to 320×240 plus
+`-DCONFIG_ZD_TOUCH_SLOP_PX=12` — and drive it with `tools/qemu-drive.py --width
+320 --height 240`. The bug presented as a click on a Minesweeper cell arriving as
+the letter `d`. That is not a substitute for the board (it has no SD card, no bus
+arbiter and no real finger) but it reproduces every layout and slop decision
+exactly, in seconds, with a console. It is now the cheapest way to check anything
+the CoreS3's geometry touches.
+
+The fix is the general one: the checks save and restore the keyboard, and assert
+that they did. A test that changes the desktop it is testing is worse than no
+test.
+
+**[M] Xtensa caught a 64-bit divide.** `(uptime_ms() - started) / 1000` is one
+instruction on arm64 and a call to libgcc's `__divdi3` on 32-bit Xtensa, which a
+zapp may not import. It built cleanly for the CoreS3 and would have failed at
+load; `nm -D -u build-cores3/mines.llext` is what showed it, and narrowing the
+delta to `uint32_t` before dividing fixed it. This is the second member of the
+same family as the synthesised `memset` — the compiler emitting a libc or libgcc
+call nobody wrote — and the first one that only exists on one architecture.
+
+**[M] On the CoreS3, Minesweeper is 9×3.** Stated rather than hidden. A cell has
+to be a fingertip, so it is `16 + CONFIG_ZD_TOUCH_SLOP_PX` = 28 px; 240 px of
+screen less the taskbar, the frame, a 30 px titlebar, a 26 px menu bar and a
+34 px counter panel leaves 112, which is three rows. Beginner clamps to 9×3 with
+3 mines, and the first click usually clears it. That is a demo, not a game. The
+same three difficulties are 9×9, 16×10 and 29×10 on a 480×272 panel, where they
+play properly. Nothing here is wrong; the screen is simply too small for this
+particular application, which is a fair thing for a desktop to be able to say.
+
 ---
 
 ## 8. Explicitly deferred
@@ -1233,6 +1356,25 @@ New to this list after milestone L:
 - **Multi-select.** `list_create()` takes a flags word with nothing defined in
   it, which is where that would go.
 
+New to this list after milestone M:
+
+- **A high score table.** It needs a name (the prompt dialog exists), a file
+  (storage exists) and a date to stamp it with, which still does not. The third
+  time that same gap has stopped something.
+- **Chording** — clicking both buttons on a satisfied number to open its
+  neighbours. There is one button, and the two gestures it can make are already
+  spent on uncover and flag.
+- **Press feedback on a grid cell.** Windows drew the cell under the pointer
+  sunken while it was held. That needs an invalidate per pointer sample and a
+  fifth piece of widget state, and buys least on the panel where a thumb is
+  covering the cell anyway.
+- **A grid that scrolls, or cells that are not square.** Both are the answer to
+  "the board does not fit on the CoreS3", and both are worse answers than saying
+  so. A scrolling minefield is not a minefield you can read.
+- **A frame clock.** `timer_start()` has a floor on purpose. Anything wanting
+  animation wants `ZD_ZAPP_FLAG_WANTS_THREAD`, which is the terminal's problem
+  too.
+
 **Filesystem access from a zapp left this list in ABI 0.3** — see milestone I.
 **Window resize, minimise, the taskbar window list and `ZD_EV_WINDOW_CLOSE_REQUEST` left
 it in ABI 0.4** — see milestone J.
@@ -1240,6 +1382,7 @@ it in ABI 0.4** — see milestone J.
 milestone K.
 **The file browser, list widgets, picker navigation and launching one zapp from
 another left it in ABI 0.6** — see milestone L.
+**Cell grids and zapp timers left it in ABI 0.7** — see milestone M.
 
 ---
 
@@ -1288,6 +1431,16 @@ another left it in ABI 0.6** — see milestone L.
   `ZD_ZAPP_FLAG_WANTS_THREAD` is now the only flag still defined and not
   honoured, and honouring it means locking discipline, priorities, and tearing
   down a thread that may be blocked. Nothing about L made it cheaper.
+- ~~**Third post-MVP zapp.**~~ **[M] Answered: Minesweeper**, which was not on
+  the list at all and was the most useful thing that could have been. The two
+  named candidates were both *applications*, and applications keep asking for
+  one more widget. A game asked instead for a way to draw something the desktop
+  will never have a widget for, and for the ability to do anything at all
+  without being clicked — two gaps that no amount of thinking about terminals
+  and browsers had surfaced. **The lesson is about picking the next zapp**: the
+  ABI learns more from something structurally unlike what it already serves than
+  from the next obvious application. The terminal is still the expensive one and
+  `WANTS_THREAD` is still the only unhonoured flag.
 
 ## 10. Verification
 

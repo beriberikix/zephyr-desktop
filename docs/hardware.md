@@ -416,6 +416,75 @@ selecting. And whether double-tap-to-open is comfortable at a 400 ms window with
 the same 10 px tolerance, or whether opening needs a menu item on this board.
 `File -> Open` exists partly so that there is an answer if it does not.
 
+### A CoreS3-shaped QEMU image, which you should build before believing anything
+
+Cheaper than the board and it found a bug the board had been showing for a whole
+milestone without anyone noticing. Set `ramfb` to this panel's size and turn on
+this board's touch slop:
+
+```sh
+cat > /tmp/thumb.overlay <<'EOF'
+&ramfb0 { width = <320>; height = <240>; };
+EOF
+west build -p -b qemu_cortex_a53 -d build-thumb app -- \
+    -DEXTRA_DTC_OVERLAY_FILE=/tmp/thumb.overlay -DCONFIG_ZD_TOUCH_SLOP_PX=12
+tools/qemu-drive.py -d build-thumb --width 320 --height 240 'wait:2' 'click:20,226'
+```
+
+`--width`/`--height` matter: the driver defaults to 480x272 and will otherwise
+send coordinates that land somewhere else entirely, which looks exactly like a
+dead UI.
+
+What this is *not*: it has no SD card, no GPIO35 arbiter, no PSRAM and no real
+finger, so nothing in the sections above can be checked with it. What it is: an
+exact reproduction of every layout and touch-slop decision, in seconds, with a
+console you can grep. Everything in "Layout at 320x240" is now checkable without
+a cable.
+
+It earned its keep immediately. Milestone M found that **the boot selftests had
+been leaving the on-screen keyboard raised on this board since milestone K** —
+`test_text()` creates a text widget, a text widget takes the caret, and taking
+the caret calls `zd_osk_wanted(true)`, which on a board with
+`CONFIG_ZD_OSK_AUTO` raises the keyboard and by design never lowers it. So the
+desktop came up with a soft keyboard over the bottom half of the screen, put
+there by a test. It cannot happen on the real QEMU target, which has slop 0 and
+therefore no `OSK_AUTO`. It presented here as a tap on a Minesweeper cell
+arriving as the letter `d`.
+
+### Minesweeper is 9x3 here, and that is the honest answer
+
+A grid cell has to be a fingertip, so it is `16 + CONFIG_ZD_TOUCH_SLOP_PX` =
+**28 px** on this board — cells share edges, so they are made bigger rather than
+given hit slop, for the reason the next section exists. Then:
+
+| | px |
+|---|---|
+| panel | 240 |
+| taskbar | −28 |
+| window frame | −6 |
+| titlebar (`14 + slop` plus 4) | −30 |
+| content gap | −2 |
+| menu bar (`14 + slop`) | −26 |
+| counter panel (one cell row plus its border) | −34 |
+| gap | −2 |
+| **left for the board** | **112** = 3 rows of 28 |
+
+So Beginner clamps from 9x9 to **9x3 with 3 mines**, and the first click usually
+clears it. Width is not the constraint — 11 columns fit — but the zapp clamps
+down and never up, so a Beginner board stays 9 wide.
+
+On a 480x272 panel the same three difficulties come out 9x9, 16x10 and 29x10 and
+play properly. Nothing here is misconfigured: the screen is simply too small for
+this particular application, which is a thing a desktop should be able to say
+out loud. The alternatives — a scrolling minefield, or cells too small to tap —
+are both worse than saying it.
+
+**Not yet judged by thumb**, and the question this file wants an answer to is
+whether **hold-to-flag** is comfortable: it is `long_press_time` (400 ms) with a
+10 px movement tolerance, and a thumb that rolls during a deliberate hold reads
+as a drag. If it does not work there is no fallback gesture, because there is no
+second button — it would have to become a mode toggle in the Game menu.
+
 ## Touch: two things had to be fixed
 
 Both were found on the device, and the second is not board-specific.
@@ -555,7 +624,8 @@ not to be, it belongs in this section rather than being shipped quietly.
 ## What has and has not run on hardware
 
 **Confirmed on the device, end to end:** boot; the ili9342c display; the full
-selftest on Xtensa (51 checks at the time, 160 as of milestone L); the FT6336 touch panel; the launcher opening on tap
+selftest on Xtensa (51 checks at the time, 161 when milestone L was flashed);
+the FT6336 touch panel; the launcher opening on tap
 and listing the three discovered zapps; tapping `hello`, which reads the `.llext`
 off the filesystem, relocates an **Xtensa shared object** through the buffer
 loader into the Harvard instruction/data heaps, and draws
@@ -615,3 +685,16 @@ measurement made it look systematic and it is not. The practical consequence is
 the same either way: **a 30 px row is about the smallest thing worth putting
 under a thumb here, and anything at the very bottom edge of the panel needs to
 reach y=239.** Rows any smaller lose taps to the neighbour below.
+
+**Not yet on the device, as of milestone M.** The board was last flashed at
+milestone L. Everything in M builds for it — `west build -b
+m5stack_cores3/esp32s3/procpu -d build-cores3 app`, and
+`xtensa-...-nm -D -u build-cores3/*.llext` shows nothing but the pre-existing
+`memset` — and the CoreS3-shaped QEMU image above covers the layout. What it
+cannot cover, and what needs a thumb:
+
+- Whether the boot keyboard fix is actually visible, i.e. the desktop now comes
+  up with no keyboard.
+- Whether hold-to-flag works on a grid cell (see above).
+- Whether a 9x3 Minesweeper is worth having on this panel at all, or whether the
+  zapp should decline to start below some size and say so.

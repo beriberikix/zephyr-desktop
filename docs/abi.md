@@ -4,7 +4,7 @@ The contract is `include/zd/zapp_abi.h`. This document explains the parts of it
 that a header comment cannot: why it is shaped this way, and what it does *not*
 promise.
 
-Current version: **0.6**.
+Current version: **0.7**.
 
 ## Shape
 
@@ -40,7 +40,7 @@ A vtable rather than a pile of exported functions because it:
   with, and inserting a value renumbers everything after it with nothing in the
   versioning machinery to notice. The key codes are spelled as `#define`s with
   explicit values so this is impossible to miss.
-- The **event union may grow**, and did in 0.5 and again in 0.6. That is safe
+- The **event union may grow**, and did in 0.5, 0.6 and 0.7. That is safe
   and `sizeof(struct zd_event)` is deliberately *not* pinned: a zapp only ever reads the event
   through a pointer the desktop handed it, and only members it knows about. What
   may not change is where anything already there lives, which the header states
@@ -189,7 +189,24 @@ the ABI at all. Since 0.5 `window_get_content_size()` answers the same question
 at any time, which is what a zapp needs at `init()` — before that there was no
 way to know and the advice was to guess and refine on the first resize.
 
-**It arrives on release, not during the drag.** A zapp callback may open files,
+**`window_set_geometry()` has a ceiling as well as a floor**, as of 0.7. Below
+the desktop's minimum window size a request is raised; above the usable area it
+is lowered — a window taller than the screen has its resize grip under the
+taskbar and, once moved, its titlebar off the top, so it can be neither resized
+nor dragged back. The ABI has always said to check `window_get_geometry()`
+rather than assume you got what you asked for; this is the same sentence with
+the other inequality.
+
+That ceiling is also **how a zapp finds out how much room there is**, and it is
+why there is no screen-size call and should not be. What a zapp may have is not
+the size of the panel — it is whatever the desktop is willing to give it, which
+is a different and more useful number, and one that would change the day this
+desktop grows a dock or a second monitor. Ask for an absurd window, read back
+what arrived, lay out inside that, and resize to what you actually need.
+Minesweeper picks its board this way, which is why it comes up 9×9 on a 480×272
+panel and 9×3 on a 320×240 one without knowing either number.
+
+**`ZD_EV_RESIZED` arrives on release, not during the drag.** A zapp callback may open files,
 and on the CoreS3 the filesystem borrows the display's pin, so one filesystem-
 capable callback per pointer sample would stop the screen for the length of a
 drag. The content area tracks the pointer live; only the zapp's own widgets lag
@@ -359,6 +376,84 @@ streaks, and its thresholds are better than a hand-rolled timer's would have
 been: the interval is the long-press time and the movement tolerance is the
 scroll limit — *the same number that decides whether the gesture was a scroll*.
 A finger that travelled far enough to scroll the list was scrolling it.
+
+## Grids of cells
+
+Added in 0.7, and the answer to a question the other three content types kept
+raising and could not settle: **how does a zapp draw something the desktop has
+no widget for?** A label shows a string, a text field edits one, a list chooses
+between many. None of them can put a game board, a keypad, a colour palette or a
+character map on screen, and a zapp cannot draw one itself, because it never
+sees an `lv_obj_t`.
+
+A grid is a rectangle of small square cells, each carrying a short string, a
+text colour and one of three bevels — `ZD_CELL_RAISED`, `ZD_CELL_SUNKEN`,
+`ZD_CELL_FLAT`. The desktop paints them, so they match the rest of the chrome
+without a zapp knowing what a bevel is.
+
+**The cells are a model and the picture is derived**, the same rule lists
+follow. Here it is not a discipline but a fact about the implementation: a grid
+is *one* LVGL object that draws every cell itself, so there are no child widgets
+to create, destroy, or be standing on when a callback rewrites the board.
+Rewriting all eighty-one cells from inside `ZD_EV_GRID_CLICK` is an ordinary
+thing to do, and unlike every other widget here it needs no explanation of why
+it is safe.
+
+**Do not do the arithmetic yourself.** A cell's size is the desktop's, it scales
+with the board's touch slop, and it is deliberately not reported as a number to
+multiply — a zapp that laid out its own grid would be right on one target and
+wrong on the next. Two calls, neither of which needs a grid to exist:
+
+- `grid_measure(cols, rows, &w, &h)` — how much room a grid would take.
+- `grid_fit(w, h, &cols, &rows)` — the largest grid that fits in a box. Either
+  answer may be 0, which means there is no grid worth creating.
+
+`grid_get_capacity()` bounds `cols * rows` and follows the same "ask, do not
+assume" rule as `text_get_capacity()` and `list_get_capacity()`. Note that in
+practice the pixels run out long before the capacity does, which is what
+`grid_fit()` is for.
+
+One event, `ZD_EV_GRID_CLICK`, with `ev->grid.action`:
+
+- `ZD_GRID_PRIMARY` — a click, or a tap.
+- `ZD_GRID_SECONDARY` — a press held down.
+
+**A gesture produces exactly one of the two, never both.** There is no second
+mouse button anywhere in this project — LVGL's pointer indev has one, the virtio
+tablet reports one, and a fingertip has one — so a held press is how a cell gets
+a second verb. The desktop swallows the click that a long press would otherwise
+also produce on release, so a zapp never has to unpick the pair. Minesweeper is
+the worked example: tap to uncover, hold to flag, and getting the ordering wrong
+would flag a mine and immediately step on it.
+
+Press feedback is deliberately absent: a cell is not drawn sunken while your
+finger is on it. That needs an invalidate per pointer sample, and on a touch
+panel your thumb is over the cell anyway.
+
+## Timers
+
+Also 0.7, and much smaller: `timer_start(period_ms, id)` and `timer_stop(id)`,
+arriving as `ZD_EV_TIMER`.
+
+This is **the first thing in the ABI that lets a zapp run when the user has done
+nothing**. Everything up to 0.6 was strictly reactive — a zapp ran inside a
+callback or it did not run — which was exactly right for a text editor and a
+file browser and is not enough for a clock, a progress bar, or a game with a
+stopwatch in the corner.
+
+- A timer belongs to your **instance**, not to a window, and `ev->win` is
+  therefore `NULL`. That makes it the first event the usual `ev->win != mine`
+  guard cannot filter, so check the type first.
+- Periods are **rounded up** to a floor the desktop sets. This is not a frame
+  clock and there is no way to ask for one: zapps run as callbacks on the thread
+  that draws the screen, so a zapp woken every millisecond is a desktop that
+  never repaints.
+- It is late, not exact. Use `uptime_ms()` to *measure* elapsed time and a timer
+  to know when to look — a game that counted ticks would lose a second every
+  time a cascade took longer than the period.
+- Starting an id that is already running re-arms it rather than making a second.
+- Your timers are stopped for you when your instance goes. That is not tidiness:
+  a timer outliving the code it dispatches into is a use-after-free on a clock.
 
 ## Dialogs
 

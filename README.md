@@ -33,6 +33,14 @@ Verified over 20 consecutive launch/close cycles: 20 loads, 20 unloads, zero
 errors, and after every one — 0 windows live, 8 slab blocks free, 0 zapps live,
 0 handles live.
 
+Since then the ABI has grown one zapp at a time, and only ever by appending.
+It now ships a **text editor** (typing, selection, clipboard, menus, dialogs),
+a **file browser** that navigates the filesystem and hands a `.txt` to the
+editor, and **Minesweeper** — which was the useful one, because it is the only
+zapp so far that is not an application. It asked for a way to draw something the
+desktop will never have a widget for, and for the ability to do anything at all
+without being clicked. Both had been missing and neither had been noticed.
+
 It also runs **on hardware**: the whole criterion above, by touch, on an
 **M5Stack CoreS3** — 320×240 touchscreen, Xtensa rather than ARM, zapps loaded
 off a microSD card. Getting the card working meant arbitrating GPIO35, which
@@ -118,7 +126,7 @@ app/                the desktop image
   src/shell/        background, taskbar, launcher, clock
   src/host/         host-API vtable, fs shim, session, storage
   src/loader/       llext discover/load/instance/unload, boot seeding
-zapps/              desktop apps, one .c file each (not apps/ -- see below)
+zapps/              hello, notes, notepad, files, mines (not apps/ -- see below)
 tools/              headless screenshot and zoom harness
 ```
 

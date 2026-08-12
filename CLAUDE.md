@@ -25,6 +25,15 @@ Two things are load-bearing and get real care. Everything else may be scrappy:
    The browser needed *nothing* new from storage -- every filesystem call it makes
    had been in the ABI, unused, since 0.3.
 
+   0.7 is Minesweeper, and it is the one that was not an application. A game
+   asked for a way to draw something the desktop will never have a widget for
+   (`zd_grid_t`, a rectangle of bevelled cells) and for the ability to do
+   anything at all without being clicked (`timer_start()`, `ZD_EV_TIMER` -- the
+   first non-reactive thing in the ABI, missing since 0.1 and never noticed).
+   **Pick the next zapp for being structurally unlike what the ABI already
+   serves**, not for being the next obvious application; the two candidates
+   design.md had named would both have asked for one more widget.
+
    The append-only rule covers `enum zd_event_type` and the `ZD_KEY_*` constants as
    well as the vtable. New values go on the *end*, never next to the ones they belong
    with: inserting one renumbers everything after it and silently breaks zapps built
@@ -97,10 +106,13 @@ manifest/west.yml   the pin. This dir exists only so topdir can be the repo root
 include/zd/         the app ABI. No Zephyr and no LVGL headers may appear here.
 app/                the desktop image (the Zephyr application)
   src/wm/           client struct, stacking, focus, drag/resize, handle registry
-  src/chrome/       retro bevels, titlebar, palette, and the shared row list
-                    the ABI's list widget and the file picker are both built on
+  src/chrome/       retro bevels, titlebar, palette, the shared row list the
+                    ABI's list widget and the file picker are both built on,
+                    and cellgrid.c -- one lv_obj_t that draws a whole board
   src/shell/        background, taskbar, launcher, clock, window list
-  src/host/         host-API vtable, fs shim + zapp storage, session
+  src/host/         host-API vtable, fs shim + zapp storage, session, and the
+                    handle/ownership layers over each widget (text, list, grid)
+                    plus timer_api.c, the only thing here that is not reactive
   src/loader/       llext discover/load/instance/unload, boot seeding
   src/input/        the one funnel every key enters through, and the US keymap
   src/chrome/       ...also menu bars and their drop-downs
@@ -108,7 +120,8 @@ zapps/              desktop apps. Named zapps/, not apps/, so it is never misrea
                     as Zephyr's app/. Several files each since ARM moved to
                     LLEXT_TYPE_ELF_RELOCATABLE; zapps/lib/ is the no-libc helpers
                     they share. hello stays one file on purpose. files/ is the
-                    browser, and the only ZD_ZAPP_FLAG_SINGLETON zapp.
+                    browser, and the only ZD_ZAPP_FLAG_SINGLETON zapp. mines/
+                    is Minesweeper, and the reason 0.7 exists.
 zephyr/ modules/    west-managed, gitignored
 ```
 
@@ -138,6 +151,14 @@ west build -b qemu_cortex_a53 app -- -DEXTRA_CONF_FILE=smoke.conf   # CONFIG_ZD_
 
 Read build output **unfiltered**. A `grep` for `error` hid a failure in milestone J and
 QEMU then happily ran the previous ELF and reported a false pass.
+
+And read the smoke test's *reasons*, not its counts. `badabi` is last in the seed
+order, so when the llext heap stops holding one more zapp it is the entry that is
+supposed to be refused that fails to load — with `-ENOMEM`, while the summary
+still says "1 refused" and PASSes, and the ABI version gate has quietly stopped
+being exercised. That happened in M, one milestone after K wrote down that it
+would. `smoke.c` now checks the errno itself; the general lesson is that a
+prediction written in a document is not a check.
 
 ## Rules that are easy to get wrong
 
@@ -170,6 +191,16 @@ QEMU then happily ran the previous ELF and reported a false pass.
     catch up. Generalise from *this* one: a surface that is rebuilt often enough
     wants a model, not another deferral.
 
+  There is no sixth, and that is the point of `chrome/cellgrid.c`. A zapp
+  rewrites a whole Minesweeper board from inside the dispatch of a click on it —
+  the same hazard again — and it is safe because a grid is **one** `lv_obj_t`
+  that draws every cell itself. No children, so nothing exists to be destroyed
+  under the callback: no reap, no dirty flag, no deferral. Milestone M added a
+  widget and added nothing to the drain order below. **Take this as a direction,
+  not a curiosity: when a surface is rebuilt often enough, drawing it yourself is
+  both cheaper and safer than composing it out of widgets**, and the deferral
+  machinery is what composing costs.
+
   Everything deferred is drained from `main()`'s loop in a fixed order — windows,
   instances, queued launches, taskbar, menu, dialog, lists, then queued keys — and
   the order is load-bearing. Lists come after dialogs specifically, because
@@ -193,6 +224,36 @@ QEMU then happily ran the previous ELF and reported a false pass.
   board fragment. Met a third time in K with menu bars; `chrome/menu.c` sizes titles and
   rows from the slop, and the on-screen keyboard sidesteps it entirely by being one
   `lv_buttonmatrix`, whose grid cannot overlap by construction.
+
+  A grid cell is the most adjacent control there can be — cells share edges — so it
+  is `16 + CONFIG_ZD_TOUCH_SLOP_PX`, and the number is **not exported to zapps to
+  multiply**. They ask `grid_fit()` and `grid_measure()`, which is how Minesweeper
+  comes up 9x9 on a 480x272 panel and 9x3 on a 320x240 one without knowing either
+  number. On the CoreS3 that makes it a demo rather than a game; say so, rather
+  than shrinking the cell.
+- **A boot check must leave the desktop as it found it.** `test_text()` creates a
+  text widget, which takes the caret, which raises the on-screen keyboard on any
+  board with `CONFIG_ZD_OSK_AUTO` — and `zd_osk_wanted()` only ever raises, on
+  purpose. So the CoreS3 booted with a keyboard across half a 240 px screen, put
+  there by a test, for a whole milestone, and QEMU could not show it because slop
+  0 means no `OSK_AUTO`. `zd_selftest_run_wm()` now saves and restores it and
+  asserts that it did.
+
+  What found it is the cheapest CoreS3 check there is, and is worth reaching for
+  before believing anything about that board's layout — build the QEMU image with
+  the hardware's geometry:
+
+  ```sh
+  # a scratch overlay holding: &ramfb0 { width = <320>; height = <240>; };
+  west build -p -b qemu_cortex_a53 -d build-thumb app -- \
+      -DEXTRA_DTC_OVERLAY_FILE=$SCRATCH/thumb.overlay -DCONFIG_ZD_TOUCH_SLOP_PX=12
+  tools/qemu-drive.py -d build-thumb --width 320 --height 240 'wait:2' 'click:20,226'
+  ```
+
+  It has no SD card, no bus arbiter and no real finger, so it is not the board. It
+  reproduces every slop and layout decision exactly, in seconds, with a console.
+  Note the `--width/--height`: the driver defaults to 480x272 and silently sends
+  the wrong coordinates otherwise.
 - **Never read a size back off LVGL to compute the next thing's position.**
   `lv_obj_set_size()` does not take effect until a layout pass, so
   `lv_obj_get_width()` right after it answers the *default* -- 130 px for a bare
@@ -238,6 +299,14 @@ QEMU then happily ran the previous ELF and reported a false pass.
   That is pre-existing, present for `hello` as much as anything else, and does not stop
   the board loading zapps — but it means the ARM builds are the ones this check is
   actually sharp on.
+
+  **Run it on the Xtensa build too, though, because the trap is not only
+  `memset`.** 32-bit Xtensa has no 64-bit divide instruction, so
+  `(uptime_ms() - started) / 1000` — one instruction on arm64 — becomes a call
+  to libgcc's `__divdi3`, which builds cleanly and fails at load on the one board
+  this project has run on silicon. Narrow to `uint32_t` before dividing. Same
+  family as the synthesised `memset`: the compiler emitting a call nobody wrote,
+  and this one exists on exactly one architecture.
 - **Permissions are advisory.** The fs shim is a contract, not a security boundary: with
   no MMU isolation a loaded llext is trusted code in the kernel address space. Say so in
   docs rather than implying otherwise.
