@@ -383,6 +383,26 @@ static void test_wm(struct zd_wm *wm)
 	zd_wm_window_close_request(b);
 	check(b->pending_destroy, "a second close request forces the close");
 
+	/* Declining. The grace period is aimed at a zapp that has stopped
+	 * answering, and this is the difference between that and one that says
+	 * no -- without it a Cancel button on "save changes?" is decoration.
+	 */
+	zd_wm_window_close_request(a);
+	check(a->close_requested, "a fresh close request is outstanding");
+	zd_wm_window_close_cancel(a);
+	check(!a->close_requested, "declining clears the request");
+
+	zd_wm_reap(wm);
+	check(!a->pending_destroy, "and the window survives its own deadline");
+
+	/* And the conversation starts over rather than force-closing, which is
+	 * what would happen if the decline had merely reset a counter.
+	 */
+	zd_wm_window_close_request(a);
+	check(a->close_requested && !a->pending_destroy,
+	      "the next request defers again rather than forcing");
+	zd_wm_window_close_cancel(a);
+
 	wm->on_client_close_request = saved_close;
 
 	zd_wm_window_close_request(a);

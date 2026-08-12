@@ -422,6 +422,64 @@ formatter's, including the 1 KB ones you never sized yourself.**
 Verified after the fix: six launcher clicks, thirteen samples with proper
 press/release bursts, zero faults.
 
+## Typing on a board with no keys (milestone K)
+
+The CoreS3 has a touch panel and nothing else. Without a soft keyboard, every
+zapp that needs typing is a QEMU-only zapp and the hardware story quietly
+becomes "a desktop you can look at" — so `CONFIG_ZD_OSK` is not a convenience
+here, it is what keeps this board a first-class target.
+
+It is an `lv_buttonmatrix` on the overlay layer, toggled by an `abc` button in
+the taskbar next to the clock, and it feeds the same funnel a real keyboard does
+(`app/src/input/keys.h`) so nothing downstream can tell the two apart.
+
+**Sizing.** Keys are `20 + CONFIG_ZD_TOUCH_SLOP_PX` tall, which is 32 px here,
+and ten across a 320 px panel is 32 px wide. That is right at the 30 px figure
+the touch scatter measurements below say is the smallest thing worth putting
+under a thumb — and it is why four rows take 128 px of a 240 px screen, leaving
+84 px above the taskbar. Hence a toggle rather than a permanent strip.
+
+A matrix rather than forty separate bevelled objects, deliberately: it lays out
+one contiguous grid of exact adjacent rectangles, so keys can only be made
+*bigger* and no key can claim area outside itself. That is the hit-slop lesson
+made structural instead of remembered. The cost is that its keys are flat with a
+one-tone border rather than Win95 bevels, because a bevel is a per-object draw
+callback and a matrix is one object. An honest flat key beats a fake bevel, and
+a soft keyboard is an anachronism in this shell anyway.
+
+`CONFIG_ZD_OSK_AUTO` defaults on wherever the touch slop is non-zero — i.e.
+wherever there is presumed to be a finger and therefore no keyboard — so tapping
+into a text field raises it without a separate trip to the taskbar.
+
+**Shift and Ctrl are one-shot**, not latched. A latch is more faithful to a real
+keyboard and much worse with one thumb: every Ctrl+S would need three deliberate
+taps and leave the desktop in a modified state if the third missed.
+
+**On the board, not yet under a thumb.** The milestone-K image is flashed and
+boots clean:
+
+```
+*** Booting Zephyr OS build e201b84b04e4 ***
+mounted /SD:
+/SD:/system/zapps/notepad.llext already installed
+discovered 4 zapp(s)
+selftest: all checks passed
+selftest (wm): all checks passed          # 102 of 102, on Xtensa
+zephyr-desktop up on ili9342c@0
+touch device ft5336@38: ready
+```
+
+Those 102 include the checks that assert the chrome's hit rectangles do not
+overlap at `CONFIG_ZD_TOUCH_SLOP_PX=12` — now covering menu titles as well as
+the titlebar buttons — and the text-widget and clipboard checks at this board's
+sizing rather than QEMU's. `CONFIG_ZD_OSK_AUTO` resolves to `y` here and `n` on
+QEMU, from the touch slop alone.
+
+What is **not** yet measured is the part only a person can measure: whether a
+32 px key with nine neighbours is reliably hittable. That is a different
+proposition from a 30 px menu row with dead space around it, and if it turns out
+not to be, it belongs in this section rather than being shipped quietly.
+
 ## What has and has not run on hardware
 
 **Confirmed on the device, end to end:** boot; the ili9342c display; the full

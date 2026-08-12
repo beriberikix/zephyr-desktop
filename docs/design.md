@@ -954,22 +954,151 @@ from a stack still holding windows that are about to go.
 
 ---
 
+### K — Notepad, and the OS underneath it — **DONE (ABI 0.5)**
+
+Post-MVP, and the first milestone driven by an application rather than by the
+spine. `hello`, `notes` and `badabi` are instruments; the ask was for something a
+person would use, modelled on Windows Notepad, "developing needed OS features
+along the way, including but not limited to copy and paste". Almost all of the
+milestone is those features.
+
+41. ✅ **A zapp can be more than one file.** ARM and ARM64 moved to
+    `LLEXT_TYPE_ELF_RELOCATABLE` in their board fragments; Xtensa already
+    defaulted to `ELF_SHAREDLIB` and was left alone. Risk #6 in §9 named the text
+    editor as the thing that would hit the one-file wall and it did — Notepad is
+    four files. `zapps/lib/zapplib.c` is the immediate payoff: the no-libc
+    helpers written once instead of once per zapp. `hello` deliberately stays a
+    single translation unit, so the simplest case stays proven.
+42. ✅ **`CONFIG_ZD_SMOKE_TEST`**, which made everything after it checkable. The
+    desktop was only testable with a pointer; a headless run said the image
+    booted and nothing about whether an extension still loaded. It discovers,
+    launches everything, closes every window through the polite path, waits out
+    the grace period, and compares client, handle, open-file and instance counts
+    against boot.
+43. ✅ **A key path**, `input/keys.c`, with two sources that cannot tell each
+    other apart: `input/keymap.c` over Zephyr's input subsystem (a real virtio
+    keyboard on QEMU, added by one `-device` and one devicetree node) and
+    `shell/osk.c`, an on-screen keyboard. `wm/keys.c` is the whole routing
+    policy and is four lines long. `ZD_EV_KEY` is delivered at last.
+44. ✅ **An overlay layer.** `struct zd_layers` grew a fourth member, above the
+    taskbar, for the things that are not windows: the Start menu (which loses its
+    reparent-onto-the-screen trick), menu drop-downs, the on-screen keyboard, and
+    dialogs with the click-swallowing shade that makes them modal by
+    construction.
+45. ✅ **A text widget** (`zd_text_t` over `lv_textarea`), a **clipboard**
+    (`host/clipboard.c`, the first genuine desktop *service*), a **menu bar** in
+    the chrome, **modal dialogs** with a file picker, and a **clock** service the
+    taskbar and Notepad share.
+46. ✅ **Notepad.** File and Edit menus, accelerators, a dirty marker in the
+    title, open and save through the picker, and a close handshake that argues
+    with you. Zero undefined symbols in its `.llext`.
+47. ✅ ABI 0.5, all appends: `ZD_KEY_*`, `ZD_MOD_*`, `ZD_TEXT_*`, `ZD_DLG_*`,
+    `ZD_EV_TEXT_CHANGED`/`_MENU`/`_DIALOG`, a widened `ev->key`, ~35 vtable
+    slots, and `ZD_TITLE_MAX` moved out of the WM into the contract.
+    102 boot selftests, up from 51.
+
+**[K] The key path touched LVGL from the input thread.** Two keystrokes into the
+first Notepad test: `ZEPHYR FATAL ERROR 2: Stack overflow on CPU 0, Current
+thread: input`. The stack was the symptom — that thread is small and
+`LOG_MODE_IMMEDIATE` formats on the caller's stack — and the locking was the
+fault. Everything downstream of routing a key is LVGL's, and only the desktop
+loop may touch that. Keys are now queued and drained from the loop, which is
+exactly what LVGL's own pointer driver does; the pointer got it for free from
+Zephyr's glue, so nobody had to think about it, and keys are ours. **Any new
+input modality inherits this, not the shape of the first attempt.**
+
+**[K] Deferring destruction is not enough; opening must be deferred too.** The
+answer to one dialog is very often another dialog — Notepad's close handshake is
+"save it?" → Yes → "save as what?". Building the second inline would
+`lv_obj_clean()` the panel holding the Yes button whose dispatch was still on
+the stack: the same use-after-free `CLAUDE.md` warns about, arrived at from the
+opposite direction. Both ends of a dialog now go through the loop. The rule
+generalises: *any* surface rebuilt in response to an event needs the treatment,
+not just surfaces destroyed by one.
+
+**[K] "An ask, not a veto" was too strong, and made Cancel decoration.** 0.4 gave
+a zapp two options — close, or be closed when the grace period expired — which
+meant declining and being wedged were indistinguishable, and a *save changes?*
+box lost its window two seconds later whatever the user clicked. Notepad was the
+first zapp with a real answer and the flaw was immediately obvious.
+`window_close_cancel()` is now the third option. The grace period is aimed at
+**silence**, not at refusal; the desktop also stops counting down while a dialog
+that zapp asked for is on screen, because asking the user is doing what was
+requested. The cost — a zapp determined to decline forever keeps its window — is
+the bargain every desktop makes, and every desktop answers it with an end-task.
+This one does not have one yet, and that is now on the deferred list.
+
+**[K] The selection range was reachable through public API after all.**
+`lv_textarea` exposes only "is anything selected", which looks like a dead end
+and nearly cost this project its first `#include` of an LVGL private header. The
+range lives on the label underneath, where `lv_label_get_text_selection_start()`
+and `_end()` are public. Worth the ten minutes it took to look: no LVGL private
+header is included anywhere in this tree, and it stays that way.
+
+**[K] `list(APPEND QEMU_EXTRA_FLAGS)` in the application's CMakeLists never
+arrives, and `CONFIG_QEMU_EXTRA_FLAGS` kills the build.** `cmake/emu/qemu.cmake`
+is included from `zephyr/CMakeLists.txt` during `find_package(Zephyr)`, so the
+run target is fully assembled before the application's own body is read — the
+append has to happen *above* `find_package`. The Kconfig route reaches
+`qemu.cmake` correctly and then dies in a post-link script:
+`scripts/build/llext_inspect_discarded_groups.py` parses `.config` with
+`line.split("=")` and no maxsplit, so any value containing a second `=` — such
+as `bus=virtio-mmio-bus.4` — raises *"ValueError: too many values to unpack"*.
+Upstream bug at Zephyr main `e201b84b`.
+
+**[K] The llext heap is priced in regions, not bytes.** 128 KB held three small
+zapps and stopped holding four the moment Notepad existed, despite the four ELFs
+totalling about 30 KB. llext rounds every region of every extension up to a 4 KB
+alignment, so the cost tracks region count far more than image size. The failure
+is a `-ENOMEM` out of `llext_load()` that looks exactly like a corrupt
+extension — and here it quietly replaced `badabi`'s ABI-major refusal with an
+out-of-memory one, so the version gate stopped being tested and the smoke test
+still said "1 refused". 256 KB now.
+
+**[K] A zapp reaching for the desktop's Kconfig compiles.** Zapps are built with
+`-imacros autoconf.h`, so `CONFIG_ZD_TEXT_MAX` and `CONFIG_ZD_MAX_CLIENTS` are
+right there and work. Using them welds the zapp to one desktop build and breaks
+the out-of-tree story `include/zd/` exists to protect. Notepad asks instead —
+`text_get_capacity()` was added for exactly this — and keeps its own
+`NP_MAX_INSTANCES`.
+
+---
+
 ## 8. Explicitly deferred
 
-Named so they don't leak into the MVP: any catalog zapp (file browser, text editor, image
+Named so they don't leak into the MVP: any *further* catalog zapp (file browser, image
 viewer, media player, terminal, web server, web browser); hardware acceleration (PXP
 exists and is one Kconfig away — not now); MCU→MPU responsive layout morph; **maximise**,
-window snapping, and resize from any edge but the bottom-right corner; IPC and desktop
-services (clipboard, notifications); multiple displays; hardware-enforced isolation
-(`USERSPACE` + `llext_add_domain` + memory domains); a theming engine (MVP hardcodes one
-palette); sound; real multi-user login; thread-per-zapp (`ZD_ZAPP_FLAG_WANTS_THREAD` is
-reserved, not honoured); out-of-tree zapp builds via the llext EDK; the fw_cfg
-zapp-delivery channel; keyboard input; a dialog a zapp could put on screen during a close
-request; zapp icons; `native_sim`.
+window snapping, and resize from any edge but the bottom-right corner; notifications;
+multiple displays; hardware-enforced isolation (`USERSPACE` + `llext_add_domain` + memory
+domains); a theming engine (MVP hardcodes one palette); sound; real multi-user login;
+thread-per-zapp (`ZD_ZAPP_FLAG_WANTS_THREAD` is reserved, not honoured); out-of-tree zapp
+builds via the llext EDK; the fw_cfg zapp-delivery channel; zapp icons; `native_sim`.
+
+New to this list after milestone K, and each of them named by something that was
+actually wanted rather than imagined:
+
+- **An end-task.** `window_close_cancel()` lets a zapp decline a close, which is
+  correct and is what makes a *save changes?* box mean anything — and it means a
+  zapp that declines forever keeps its window. Every desktop answers that with a
+  force-quit out of band; the taskbar's window list is the obvious home for one.
+- **Undo.** `lv_textarea` has no undo stack, and one that survives cut, paste and
+  select-all is its own milestone rather than a corner of Notepad's.
+- **Find and Replace, word wrap toggle, print.** Each needs a dialog or a service
+  that does not exist; a greyed-out Search menu would misrepresent how finished
+  this is.
+- **A real RTC in the ABI.** `clock_now()` reports the desktop's fiction. The
+  call is the right shape; only its implementation is a lie, and only on boards
+  with no clock.
+- **Navigation in the file picker.** It lists one well-known directory and shows
+  files only.
+- **A keyboard layout that is not US.** `input/keymap.c` says so at the top.
 
 **Filesystem access from a zapp left this list in ABI 0.3** — see milestone I.
 **Window resize, minimise, the taskbar window list and `ZD_EV_WINDOW_CLOSE_REQUEST` left
 it in ABI 0.4** — see milestone J.
+**Keyboard input, the clipboard, and the text editor left it in ABI 0.5** — see
+milestone K.
 
 ---
 
@@ -992,9 +1121,10 @@ it in ABI 0.4** — see milestone J.
 5. **Turning off default export groups (task 26) may cascade.** Hello world links against
    more libc than you'd guess. Timeboxed; if it fights back, leave the groups on and
    document the gap honestly rather than burning the milestone.
-6. **One source file per zapp** under `LLEXT_TYPE_ELF_OBJECT`. Invisible for hello world,
-   an immediate wall for the text editor. Switching to `LLEXT_TYPE_ELF_RELOCATABLE` should
-   be tried once, early, just to know it works.
+6. ~~**One source file per zapp** under `LLEXT_TYPE_ELF_OBJECT`.~~ **[K] Retired.**
+   It was an immediate wall for the text editor, exactly as predicted.
+   `LLEXT_TYPE_ELF_RELOCATABLE` works on both ARM targets and cost one line per
+   board fragment.
 
 **Where I'd want your input, when we reach it:**
 
@@ -1003,10 +1133,11 @@ it in ABI 0.4** — see milestone J.
   surface narrow even at the cost of zapp ergonomics?
 - **Milestone H, step 30** — whether to buy the `rk043fn66hs_ctg` before or after the
   headless hardware checkpoint. Cheap either way; it just reorders the fun.
-- **First post-MVP zapp.** The terminal forces `WANTS_THREAD`; the file browser forces the
-  fs ABI and a list widget; the text editor forces keyboard input and multi-file
-  extensions. Whichever you pick first determines which ABI extension gets designed next,
-  and I'd rather know than guess.
+- ~~**First post-MVP zapp.**~~ **[K] Answered: the text editor.** It forced keyboard
+  input and multi-file extensions as predicted, and four things that were not on
+  the list — a text widget, a clipboard, menus and dialogs. The terminal
+  (`WANTS_THREAD`) and the file browser (a list widget, and the picker's missing
+  navigation) are the next two, and both are now cheaper than they were.
 
 ## 10. Verification
 

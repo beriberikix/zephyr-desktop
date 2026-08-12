@@ -18,14 +18,19 @@ Two things are load-bearing and get real care. Everything else may be scrappy:
 1. **The WM data model and event loop** (`app/src/wm/`) — modelled on a tiny X11 stacking
    WM. A `zd_client` struct plus one central dispatch path.
 2. **The zapp ABI** (`include/zd/zapp_abi.h`) — designed as if the terminal, text editor and
-   file browser already ran on it. Implemented as far as hello world needs, plus storage
-   (ABI 0.3), which was the one designed-but-missing half, plus window state — resize,
-   minimise and the close handshake (ABI 0.4).
+   file browser already ran on it. Storage arrived in 0.3, window state in 0.4, and
+   0.5 is what Notepad needed: keyboard input, an editable text widget, a clipboard,
+   menus, dialogs and a clock.
 
-   The append-only rule covers `enum zd_event_type` as well as the vtable. New event
-   values go on the *end*, never next to the events they belong with: inserting one
-   renumbers everything after it and silently breaks zapps built against the older minor,
-   and no version gate would catch it.
+   The append-only rule covers `enum zd_event_type` and the `ZD_KEY_*` constants as
+   well as the vtable. New values go on the *end*, never next to the ones they belong
+   with: inserting one renumbers everything after it and silently breaks zapps built
+   against the older minor, and no version gate would catch it.
+
+   The event *union* is allowed to grow, and `sizeof(struct zd_event)` is deliberately
+   not asserted — pinning it would forbid the growth that is safe. What is asserted,
+   with `_Static_assert` on `offsetof`, is that nothing already there moves. **Offsets
+   are the compatibility rule; size is not.**
 
 ## Target
 
@@ -36,6 +41,10 @@ targets — it removes the need for two.
 - Display: `zephyr,display = &ramfb0` (`drivers/display/display_qemu_ramfb.c`)
 - Pointer: `zephyr,touch = &virtio_input0` (`drivers/input/input_virtio.c`); `board.cmake`
   auto-adds `-device virtio-tablet-device`
+- Keyboard: a second `virtio,input` node on `virtio_mmio4` in the app's overlay, plus a
+  `-device virtio-keyboard-device` appended to `QEMU_EXTRA_FLAGS` *above*
+  `find_package(Zephyr)` in `app/CMakeLists.txt`. The comment there explains why the two
+  tidier ways of adding it do not work
 - macOS window: `cmake/emu/qemu.cmake` selects the `cocoa` display backend on Apple hosts
 - llext: arm64 is llext-capable and `qemu_cortex_a53` is upstream's own
   `integration_platform` for `llext.readonly_mmu`
@@ -89,8 +98,12 @@ app/                the desktop image (the Zephyr application)
   src/shell/        background, taskbar, launcher, clock, window list
   src/host/         host-API vtable, fs shim + zapp storage, session
   src/loader/       llext discover/load/instance/unload, boot seeding
-zapps/              desktop apps, one .c file each (ELF_OBJECT allows only one).
-                    Named zapps/, not apps/, so it is never misread as Zephyr's app/
+  src/input/        the one funnel every key enters through, and the US keymap
+  src/chrome/       ...also menu bars and their drop-downs
+zapps/              desktop apps. Named zapps/, not apps/, so it is never misread
+                    as Zephyr's app/. Several files each since ARM moved to
+                    LLEXT_TYPE_ELF_RELOCATABLE; zapps/lib/ is the no-libc helpers
+                    they share. hello stays one file on purpose.
 zephyr/ modules/    west-managed, gitignored
 ```
 
@@ -104,20 +117,54 @@ west build -b qemu_cortex_a53 app
 west build -t run                                     # opens a cocoa window
 ```
 
+### Checking it without a hand
+
+`west build -t run` opens a window and offers no way in but a mouse, which is how
+milestone J came to hand-test a stale binary twice. Two things fix that and both are
+worth reaching for before believing anything:
+
+```sh
+# Drive the image headless: click, type, assert on the console.
+tools/qemu-drive.py -d build 'click:30,258' 'wait:1' 'type:hello' 'key:ctrl-s'
+
+# Launch every zapp, close every window, prove the counters came back.
+west build -b qemu_cortex_a53 app -- -DEXTRA_CONF_FILE=smoke.conf   # CONFIG_ZD_SMOKE_TEST=y
+```
+
+Read build output **unfiltered**. A `grep` for `error` hid a failure in milestone J and
+QEMU then happily ran the previous ELF and reported a false pass.
+
 ## Rules that are easy to get wrong
 
 - **Never destroy during dispatch.** A zapp calling `window_close()` from its own callback
   is inside `lv_timer_handler()` on a stack frame owned by the extension. Deleting the
   LVGL subtree there — let alone `llext_unload()` — is a use-after-free. Everything goes
   through the deferred reap in `app/src/wm/`. This is the most likely source of faults in
-  the whole project.
+  the whole project, and it now has four customers, only one of which has a zapp in it:
 
-  It has a second customer with no zapp in it: the taskbar window list. Clicking one of
-  its buttons changes focus, which fires `wm->on_client_list_changed`, which would
-  `lv_obj_clean()` the row holding the button currently dispatching. `shell/tasklist.c`
-  therefore only sets a dirty flag; `zd_tasklist_reap()` rebuilds from the desktop loop,
-  after `zd_wm_reap()`. Any new shell surface derived from the WM's state needs the same
-  treatment.
+  - **The taskbar window list.** Clicking one of its buttons changes focus, which fires
+    `wm->on_client_list_changed`, which would `lv_obj_clean()` the row holding the button
+    currently dispatching. `shell/tasklist.c` sets a dirty flag; `zd_tasklist_reap()`
+    rebuilds from the loop.
+  - **Menu drop-downs.** Choosing File → Exit fires `ZD_EV_MENU`, the zapp closes its
+    window, and that happens on a frame standing on the row that was clicked.
+    `zd_menu_close()` only hides; `zd_menu_reap()` empties.
+  - **Dialogs, at BOTH ends.** Answering is the obvious half. The other half is that the
+    answer to one dialog is very often *another dialog* — "save it?" → Yes → "save as
+    what?" — and building that inline would clean the panel holding the Yes button.
+    **Opening is deferred too.** Generalise from this: any surface rebuilt *in response
+    to* an event needs the treatment, not just one destroyed by an event.
+
+  Everything deferred is drained from `main()`'s loop in a fixed order — windows,
+  instances, taskbar, menu, dialog, then queued keys — and the order is load-bearing.
+- **Keys are queued, and touching LVGL off the desktop thread is the bug the queue
+  prevents.** A key arrives on Zephyr's input thread; everything downstream of routing it
+  — the text widget, a dialog's field, a zapp's `event()` — is LVGL's, and only the
+  desktop loop may touch that. The first version called straight through and died in two
+  keystrokes with `ZEPHYR FATAL ERROR 2: Stack overflow ... thread: input`. The stack was
+  the symptom; the locking was the fault. `input/keys.c` queues, `zd_keys_pump()` drains
+  from the loop — which is exactly what LVGL's own pointer driver does, so the pointer
+  never needed anyone to think about it. **A new input modality inherits the queue.**
 - **Hit slop does not compose.** `lv_obj_set_ext_click_area()` is for an *isolated*
   control — the Start button, where the space around it is dead. Adjacent controls must
   instead be *bigger*: LVGL awards an overlap to the last-added child, so two 14 px
@@ -126,7 +173,9 @@ west build -t run                                     # opens a cocoa window
   minimise box in J). Chrome sizes scale with the slop instead — `ZD_BTN_SZ`,
   `ZD_GRIP_SZ`, `ZD_TITLEBAR_H` in `app/src/wm/wm.h` — and a boot selftest asserts the
   rectangles do not overlap on the target, because the value that breaks it lives in a
-  board fragment.
+  board fragment. Met a third time in K with menu bars; `chrome/menu.c` sizes titles and
+  rows from the slop, and the on-screen keyboard sidesteps it entirely by being one
+  `lv_buttonmatrix`, whose grid cannot overlap by construction.
 - **The WM's `sys_dlist_t` is the truth for z-order**, not LVGL's child order. LVGL is a
   projection, re-applied by `zd_wm_restack()` using `lv_obj_move_to_index()`. Note
   `lv_obj_move_foreground()` exists only in LVGL's v8 compatibility shim
@@ -134,6 +183,16 @@ west build -t run                                     # opens a cocoa window
 - **Zapps never see an `lv_obj_t`.** They get opaque handles validated through a generation
   -counted registry with an owner check. The `unsafe_lvgl_content` vtable slot is NULL
   unless the zapp manifest is flagged trusted.
+- **The overlay is the fourth layer and everything modal lives on it.** `layers->overlay`
+  is the last child of the screen, so it is above the taskbar as well as above every
+  window: the Start menu, menu drop-downs, the on-screen keyboard, and dialogs with the
+  transparent clickable shade that makes them modal *by construction* rather than by
+  everyone agreeing to behave. Anything that must draw over a window and is not a window
+  belongs here rather than reparenting itself onto the screen.
+- **A zapp must not read `CONFIG_*`.** Zapps compile with `-imacros autoconf.h`, so
+  `CONFIG_ZD_TEXT_MAX` is right there and works — and using it welds the zapp to one
+  desktop build, which is the thing `include/zd/` exists to prevent. Ask through the ABI
+  (`text_get_capacity()`, `window_get_content_size()`) or carry your own constant.
 - **Every host-API call takes a `zd_zapp_ctx_t`.** No global "current user". This is what
   makes multi-user a login screen rather than a refactor, and what lets these calls become
   syscalls if `CONFIG_USERSPACE` ever arrives.
@@ -142,7 +201,15 @@ west build -t run                                     # opens a cocoa window
 - **Zapps have no libc.** `CONFIG_LLEXT_EXPORT_DEFAULT_GROUPS=n` leaves exactly one
   importable symbol, so `strlen` and `snprintf` are out — and, less obviously, GCC
   synthesises a `memset` call from an ordinary struct assignment. That builds fine and
-  fails at load. After touching a zapp, check `nm -u build/<name>.llext`.
+  fails at load. After touching a zapp, check `nm -u build/<name>.llext` — expect at most
+  `zd_get_host_api`. The helpers in `zapps/lib/zapplib.c` exist to keep it that way and
+  write through `volatile` pointers precisely so the optimiser cannot undo them.
+
+  On Xtensa the check is `nm -D -u` (the artifact is a shared object, so the ordinary
+  symbol table is empty) and it reports an undefined `memset` that the ARM builds do not.
+  That is pre-existing, present for `hello` as much as anything else, and does not stop
+  the board loading zapps — but it means the ARM builds are the ones this check is
+  actually sharp on.
 - **Permissions are advisory.** The fs shim is a contract, not a security boundary: with
   no MMU isolation a loaded llext is trusted code in the kernel address space. Say so in
   docs rather than implying otherwise.
