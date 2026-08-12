@@ -23,6 +23,7 @@
 #include "loader/seed.h"
 #include "shell/desktop.h"
 #include "shell/launcher.h"
+#include "shell/osk.h"
 #include "shell/taskbar.h"
 #include "shell/tasklist.h"
 #include "selftest.h"
@@ -119,6 +120,7 @@ int main(void)
 	wm.on_client_list_changed = zd_tasklist_invalidate;
 	zd_zapp_loader_init(&wm, &session);
 	zd_launcher_init(&layers, &session, on_app_chosen, &wm);
+	zd_osk_init(&layers);
 	zd_selftest_run_wm(&wm);
 	zd_smoke_init(&wm, &session);
 	lvgl_unlock();

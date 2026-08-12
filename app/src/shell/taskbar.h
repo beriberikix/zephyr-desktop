@@ -7,6 +7,8 @@
 #ifndef ZD_SHELL_TASKBAR_H_
 #define ZD_SHELL_TASKBAR_H_
 
+#include <stdbool.h>
+
 #include <lvgl.h>
 
 /** Called when the launcher button is released. NULL until milestone E. */
@@ -33,5 +35,14 @@ void zd_taskbar_launcher_coords(lv_area_t *out);
  * time the clock changed width.
  */
 void zd_taskbar_list_region(lv_area_t *out);
+
+/**
+ * @brief Draw the keyboard button pressed or raised.
+ *
+ * Called by the on-screen keyboard rather than by the button's own handler,
+ * because the keyboard can also be raised by a text widget taking the caret and
+ * the button must agree with reality either way.
+ */
+void zd_taskbar_set_osk_active(bool active);
 
 #endif /* ZD_SHELL_TASKBAR_H_ */

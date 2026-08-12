@@ -153,11 +153,12 @@ void zd_launcher_init(struct zd_layers *layers, const struct zd_session *session
 	menu.cb = cb;
 	menu.cb_arg = cb_arg;
 
-	/* Lives on the panel layer's parent -- the screen -- rather than inside
-	 * the taskbar, because it has to overhang upward past the taskbar's own
-	 * bounds while still drawing above every window.
+	/* On the overlay rather than inside the taskbar: it has to overhang
+	 * upward past the taskbar's own bounds while still drawing above every
+	 * window. It used to reach for the panel's parent to get there, which
+	 * worked and was the first sign the desktop wanted an overlay layer.
 	 */
-	menu.panel = lv_obj_create(lv_obj_get_parent(layers->panel));
+	menu.panel = lv_obj_create(layers->overlay);
 	lv_obj_remove_style_all(menu.panel);
 	lv_obj_add_style(menu.panel, &zd_style_face, LV_PART_MAIN);
 	lv_obj_remove_flag(menu.panel, LV_OBJ_FLAG_SCROLLABLE);

@@ -101,8 +101,16 @@ static void bevel_draw_cb(lv_event_t *e)
 		/* Reading the state here rather than swapping the callback keeps
 		 * press feedback a pure function of LVGL state -- nothing to keep
 		 * in sync, and nothing to leak if the object dies mid-press.
+		 *
+		 * CHECKED reads the same as PRESSED, which is how Win95 drew a
+		 * toggle that is on: held down. The taskbar's keyboard button
+		 * is the first user. Note that nothing fires an event when
+		 * CHECKED is set by code, so a caller that toggles it must
+		 * invalidate; see zd_taskbar_set_osk_active().
 		 */
-		kind = (lv_obj_get_state(obj) & LV_STATE_PRESSED) ? ZD_BEVEL_IN : ZD_BEVEL_OUT;
+		kind = (lv_obj_get_state(obj) & (LV_STATE_PRESSED | LV_STATE_CHECKED))
+			       ? ZD_BEVEL_IN
+			       : ZD_BEVEL_OUT;
 	}
 
 	if (kind == ZD_BEVEL_OUT) {

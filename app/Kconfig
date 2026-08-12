@@ -148,6 +148,35 @@ config ZD_TOUCH_SLOP_PX
 	  pixel and only the hit test grows. Leave at 0 for pointer-driven
 	  targets; set it to roughly half a fingertip on touch panels.
 
+config ZD_OSK
+	bool "On-screen keyboard"
+	default y
+	select LV_USE_BUTTONMATRIX
+	help
+	  A soft keyboard on the overlay layer, toggled from the taskbar. It
+	  feeds the same funnel a real keyboard does (app/src/input/keys.h), so
+	  nothing downstream can tell the two apart.
+
+	  Not a convenience. The CoreS3 is a 320x240 touch panel with no keys
+	  at all and is the only target this project has run on silicon;
+	  without this, every zapp that needs typing is QEMU-only.
+
+	  Costs about 128 px of a 240 px screen while raised, which is why it
+	  is a toggle and not a permanent strip.
+
+config ZD_OSK_AUTO
+	bool "Raise the on-screen keyboard when something wants typing"
+	default y if ZD_TOUCH_SLOP_PX != 0
+	depends on ZD_OSK
+	help
+	  Pops the keyboard up when a text widget takes the caret, so that on a
+	  touch panel the field you just tapped can be typed into without a
+	  separate trip to the taskbar.
+
+	  Defaults on exactly where the touch slop says there is a finger and
+	  therefore presumably no keyboard. On a target with a real one this
+	  would be a large window covering the screen for no reason.
+
 config ZD_TOUCH_PROBE
 	bool "Poll the touch controller directly and log every result"
 	depends on I2C

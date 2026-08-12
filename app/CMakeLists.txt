@@ -63,6 +63,7 @@ target_sources(app PRIVATE
 )
 
 target_sources_ifdef(CONFIG_ZD_SPI_DC_MISO_ARBITER app PRIVATE src/host/bus_arb.c)
+target_sources_ifdef(CONFIG_ZD_OSK app PRIVATE src/shell/osk.c)
 target_sources_ifdef(CONFIG_ZD_SELFTEST app PRIVATE src/selftest.c)
 target_sources_ifdef(CONFIG_ZD_SMOKE_TEST app PRIVATE src/smoke.c)
 target_sources_ifdef(CONFIG_ZD_TOUCH_PROBE app PRIVATE src/touch_probe.c)

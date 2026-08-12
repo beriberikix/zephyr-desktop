@@ -9,12 +9,14 @@
 
 #include "taskbar.h"
 #include "desktop.h"
+#include "osk.h"
 #include "../chrome/theme.h"
 
 LOG_MODULE_DECLARE(zd_main, CONFIG_ZD_LOG_LEVEL);
 
 #define LAUNCHER_W 58
 #define CLOCK_W    56
+#define OSK_W      34
 #define ITEM_H     (ZD_TASKBAR_H - 8)
 #define ITEM_Y     4
 #define EDGE_PAD   3
@@ -31,8 +33,22 @@ LOG_MODULE_DECLARE(zd_main, CONFIG_ZD_LOG_LEVEL);
 
 static lv_obj_t *launcher_btn;
 static lv_obj_t *clock_label;
+static lv_obj_t *osk_btn;
 static zd_launcher_cb_t launcher_cb;
 static void *launcher_cb_arg;
+
+/** Screen x of the leftmost piece of furniture on the right-hand end. */
+static int32_t right_group_x(void)
+{
+	int32_t screen_w = lv_display_get_horizontal_resolution(NULL);
+	int32_t x = screen_w - CLOCK_W - EDGE_PAD;
+
+	if (IS_ENABLED(CONFIG_ZD_OSK)) {
+		x -= OSK_W + GAP;
+	}
+
+	return x;
+}
 
 static void clock_now(int *hour, int *minute)
 {
@@ -67,6 +83,32 @@ static void launcher_event(lv_event_t *e)
 	}
 }
 
+static void osk_event(lv_event_t *e)
+{
+	ARG_UNUSED(e);
+	zd_osk_toggle();
+}
+
+void zd_taskbar_set_osk_active(bool active)
+{
+	if (osk_btn == NULL) {
+		return;
+	}
+
+	/* ZD_BEVEL_BUTTON draws CHECKED sunken, the way Win95 drew a toggle
+	 * that is on. Nothing invalidates on a state set by code -- LVGL only
+	 * repaints when a *style* property depends on the state, and a bevel
+	 * drawn in DRAW_POST is invisible to that check -- so say so here.
+	 */
+	if (active) {
+		lv_obj_add_state(osk_btn, LV_STATE_CHECKED);
+	} else {
+		lv_obj_remove_state(osk_btn, LV_STATE_CHECKED);
+	}
+
+	lv_obj_invalidate(osk_btn);
+}
+
 void zd_taskbar_init(lv_obj_t *panel, zd_launcher_cb_t cb, void *cb_arg)
 {
 	lv_obj_t *label;
@@ -93,6 +135,31 @@ void zd_taskbar_init(lv_obj_t *panel, zd_launcher_cb_t cb, void *cb_arg)
 	lv_obj_set_style_text_font(label, &lv_font_montserrat_12, LV_PART_MAIN);
 	lv_obj_set_style_text_color(label, lv_color_hex(ZD_C_TEXT), LV_PART_MAIN);
 	lv_obj_center(label);
+
+	/* --- keyboard toggle, just left of the clock --- */
+	if (IS_ENABLED(CONFIG_ZD_OSK)) {
+		osk_btn = lv_obj_create(panel);
+		lv_obj_remove_style_all(osk_btn);
+		lv_obj_add_style(osk_btn, &zd_style_face, LV_PART_MAIN);
+		lv_obj_remove_flag(osk_btn, LV_OBJ_FLAG_SCROLLABLE);
+		lv_obj_add_flag(osk_btn, LV_OBJ_FLAG_CLICKABLE);
+		lv_obj_set_size(osk_btn, OSK_W, ITEM_H);
+		lv_obj_set_pos(osk_btn, right_group_x(), ITEM_Y);
+		zd_bevel_attach(osk_btn, ZD_BEVEL_BUTTON);
+		/* Slop is safe here and not on the window list: the clock to
+		 * its right is not clickable and the strip to its left is
+		 * bounded away by GAP, so this is an isolated control in the
+		 * sense ext_click_area requires.
+		 */
+		lv_obj_set_ext_click_area(osk_btn, CONFIG_ZD_TOUCH_SLOP_PX);
+		lv_obj_add_event_cb(osk_btn, osk_event, LV_EVENT_CLICKED, NULL);
+
+		label = lv_label_create(osk_btn);
+		lv_label_set_text(label, "abc");
+		lv_obj_set_style_text_font(label, &lv_font_montserrat_12, LV_PART_MAIN);
+		lv_obj_set_style_text_color(label, lv_color_hex(ZD_C_TEXT), LV_PART_MAIN);
+		lv_obj_center(label);
+	}
 
 	/* --- clock, hard right, sunken --- */
 	clock_box = lv_obj_create(panel);
@@ -126,11 +193,9 @@ void zd_taskbar_launcher_coords(lv_area_t *out)
 
 void zd_taskbar_list_region(lv_area_t *out)
 {
-	int32_t screen_w = lv_display_get_horizontal_resolution(NULL);
-
 	out->x1 = EDGE_PAD + LAUNCHER_W + GAP;
 	out->y1 = ITEM_Y;
-	out->x2 = screen_w - CLOCK_W - EDGE_PAD - GAP - 1;
+	out->x2 = right_group_x() - GAP - 1;
 
 	/*
 	 * Flush with the bottom of the panel -- and so with the bottom of the

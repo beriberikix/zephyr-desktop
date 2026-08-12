@@ -49,10 +49,21 @@ void zd_desktop_init(struct zd_layers *layers)
 	lv_obj_set_pos(layers->windows, 0, 0);
 	lv_obj_remove_flag(layers->windows, LV_OBJ_FLAG_CLICKABLE);
 
-	/* Panel. Last child, so permanently on top. Populated at milestone B. */
+	/* Panel. Populated at milestone B. */
 	layers->panel = bare_child(scr);
 	lv_obj_set_size(layers->panel, LV_PCT(100), ZD_TASKBAR_H);
 	lv_obj_set_pos(layers->panel, 0, lv_display_get_vertical_resolution(NULL) - ZD_TASKBAR_H);
 	lv_obj_add_style(layers->panel, &zd_style_face, LV_PART_MAIN);
 	zd_bevel_attach(layers->panel, ZD_BEVEL_OUT);
+
+	/* Overlay. Last child, so permanently on top -- above the taskbar too,
+	 * which is where a menu drop-down and a modal dialog both have to be.
+	 * Not clickable, for the same reason the window layer is not: LVGL
+	 * still descends into its children, but a press on empty overlay falls
+	 * through instead of being swallowed here.
+	 */
+	layers->overlay = bare_child(scr);
+	lv_obj_set_size(layers->overlay, LV_PCT(100), LV_PCT(100));
+	lv_obj_set_pos(layers->overlay, 0, 0);
+	lv_obj_remove_flag(layers->overlay, LV_OBJ_FLAG_CLICKABLE);
 }
