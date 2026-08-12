@@ -1290,6 +1290,28 @@ delta to `uint32_t` before dividing fixed it. This is the second member of the
 same family as the synthesised `memset` — the compiler emitting a libc or libgcc
 call nobody wrote — and the first one that only exists on one architecture.
 
+**[M] A tuning knob that does not exist on a board is a knob that silently does
+nothing.** The llext heap bump above fixed ARM and did nothing at all for the
+CoreS3, because ESP32-S3 is Harvard and `CONFIG_LLEXT_HEAP_SIZE` is undefined
+there — the heap is two heaps. Kconfig is not silent about it (`LLEXT_HEAP_SIZE
+was assigned the value '384' but got (undefined)`), and that line had been in
+every build log for the whole milestone without being read. It is the same shape
+as the `[H]` finding about a board fragment's `=n` being overridden by a
+`select`: the build tells you, in a warning, in a log nobody greps. **Per-board
+Kconfig warnings are findings.**
+
+The symptoms it produced were also a lesson in not trusting them. What came back
+from the device was "there is a lag on the touch, and I don't see the new zapp"
+— and *neither* was in milestone M's new code, which does not execute at all
+until a grid or a timer exists. The zapp was missing from the launcher rather
+than failing to load, which is upstream of any heap. Two unrelated things were
+true at once: an image that predated the milestone, and a first boot after an
+ABI bump, which rewrites every zapp on the card because the minor version lives
+in each manifest — 55 KB of writes plus 55 KB of verification reads through the
+pin arbiter, enough to overflow the input queue if you tap during it. Both are
+one-time. Neither is the heap. The heap was a real bug found while looking for a
+different one.
+
 **[M] On the CoreS3, Minesweeper is 9×3.** Stated rather than hidden. A cell has
 to be a fingertip, so it is `16 + CONFIG_ZD_TOUCH_SLOP_PX` = 28 px; 240 px of
 screen less the taskbar, the frame, a 30 px titlebar, a 26 px menu bar and a

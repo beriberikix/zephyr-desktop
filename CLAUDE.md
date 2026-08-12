@@ -152,6 +152,14 @@ west build -b qemu_cortex_a53 app -- -DEXTRA_CONF_FILE=smoke.conf   # CONFIG_ZD_
 Read build output **unfiltered**. A `grep` for `error` hid a failure in milestone J and
 QEMU then happily ran the previous ELF and reported a false pass.
 
+**Read the Kconfig warnings too, and read them per board.** `CONFIG_LLEXT_HEAP_SIZE`
+does not exist on the CoreS3 — ESP32-S3 is Harvard, so the heap is two heaps —
+and raising it for ARM in `app/prj.conf` did nothing there for a whole
+milestone while Kconfig said `was assigned the value '384' but got (undefined)`
+on every single build. Same shape as `[H]`'s board fragment whose `=n` was
+overridden by a `select`. A knob that does not exist on a target is a knob that
+silently does nothing, and the build does tell you.
+
 And read the smoke test's *reasons*, not its counts. `badabi` is last in the seed
 order, so when the llext heap stops holding one more zapp it is the entry that is
 supposed to be refused that fails to load — with `-ENOMEM`, while the summary

@@ -686,15 +686,40 @@ the same either way: **a 30 px row is about the smallest thing worth putting
 under a thumb here, and anything at the very bottom edge of the panel needs to
 reach y=239.** Rows any smaller lose taps to the neighbour below.
 
-**Not yet on the device, as of milestone M.** The board was last flashed at
-milestone L. Everything in M builds for it — `west build -b
-m5stack_cores3/esp32s3/procpu -d build-cores3 app`, and
-`xtensa-...-nm -D -u build-cores3/*.llext` shows nothing but the pre-existing
-`memset` — and the CoreS3-shaped QEMU image above covers the layout. What it
-cannot cover, and what needs a thumb:
+**Milestone M runs on the device.** Six zapps discovered off the card,
+Minesweeper among them, and the desktop responsive to touch.
 
-- Whether the boot keyboard fix is actually visible, i.e. the desktop now comes
-  up with no keyboard.
-- Whether hold-to-flag works on a grid cell (see above).
-- Whether a 9x3 Minesweeper is worth having on this panel at all, or whether the
-  zapp should decline to start below some size and say so.
+Getting there took one wrong turn worth recording, because the symptoms pointed
+somewhere else entirely: *"there seems to be a lag on the touch, and I don't see
+the new zapp."* Neither symptom was in milestone M's new code — nothing in it
+runs at all until a grid or a timer exists, and the zapp was missing from the
+launcher rather than failing to load. Both went away on a reflash with the
+resized heaps below. Two things had been true at once and only one of them was
+a bug:
+
+- **`CONFIG_LLEXT_HEAP_SIZE` does not exist on this board.** ESP32-S3 is
+  Harvard, so the heap is split into `LLEXT_INSTR_HEAP_SIZE` and
+  `LLEXT_DATA_HEAP_SIZE` — which means the 256 KB → 384 KB bump the sixth zapp
+  forced on ARM did *nothing* here, and this board's heaps were still sized for
+  the three small zapps that existed when they were written. Kconfig says so on
+  every build (`LLEXT_HEAP_SIZE was assigned the value '384' but got
+  (undefined)`) and it had been scrolling past unread. **A per-board Kconfig
+  warning is a finding, not noise.**
+- **The first boot after an ABI bump rewrites every zapp on the card.** The
+  minor version lives in each manifest, so `same_content()` finds all six
+  mismatched and reinstalls them: about 55 KB of writes plus 55 KB of
+  verification reads, every one of them through the GPIO35 arbiter. Tapping
+  during that will overflow the input queue. It is a one-time cost per flash and
+  the second boot is reads only — worth knowing before diagnosing it as
+  something permanent.
+
+Still wanted from a thumb, and not answered by "it works":
+
+- Whether the desktop now comes up with **no on-screen keyboard** — the boot
+  checks were leaving one raised on this board since milestone K, and the fix
+  cannot be seen on QEMU.
+- Whether **hold-to-flag** survives a rolling thumb: 400 ms with a 10 px
+  movement tolerance, and no fallback gesture if it does not, because there is
+  no second button.
+- Whether a **9x3 Minesweeper** is worth having on this panel at all, or whether
+  the zapp should decline below some size and say so.
