@@ -42,6 +42,7 @@ target_sources(app PRIVATE
   src/chrome/titlebar.c
   src/chrome/menu.c
   src/chrome/rowlist.c
+  src/chrome/cellgrid.c
   src/shell/desktop.c
   src/shell/taskbar.c
   src/shell/launcher.c
@@ -52,8 +53,10 @@ target_sources(app PRIVATE
   src/host/fs_shim.c
   src/host/fs_api.c
   src/host/host_api.c
+  src/host/grid_api.c
   src/host/list_api.c
   src/host/text_api.c
+  src/host/timer_api.c
   src/host/clipboard.c
   src/host/clock.c
   src/loader/zapp_loader.c

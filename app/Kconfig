@@ -143,6 +143,59 @@ config ZD_LIST_MAX_ITEMS
 	  directory has more in it" instead of quietly lying. A zapp must never
 	  read this symbol directly -- see CLAUDE.md.
 
+config ZD_MAX_GRIDS
+	int "Maximum simultaneously live cell grids, desktop-wide"
+	default 4
+	help
+	  A game with a board and a face button is two; two games at once are
+	  four. Fixed array, for the reason windows, lists and open files are.
+
+config ZD_GRID_CELLS_TOTAL
+	int "Cells shared between every live grid"
+	default 768
+	help
+	  One pool for the whole desktop, exactly as ZD_LIST_ITEMS_TOTAL is, and
+	  for the same reason -- four grids each able to hold a full board would
+	  reserve most of the spare .bss on a board with 512 KB of it to draw a
+	  nine-by-nine.
+
+	  Unlike list rows, cells are taken a whole grid at a time and are
+	  indexed arithmetically, so this is carved into contiguous blocks
+	  rather than chained. A cell costs eight bytes, so the default is six
+	  kilobytes.
+
+config ZD_GRID_MAX_CELLS
+	int "Most cells any one grid may have"
+	default 480
+	help
+	  Reported to zapps through grid_get_capacity(); creating a larger grid
+	  is refused rather than silently clipped. 480 is Minesweeper's Expert
+	  board, which is the largest thing anybody has asked for and does not
+	  come close to fitting on any panel here -- the pixels run out first,
+	  which is what grid_fit() is for.
+
+	  A zapp must never read this symbol directly; see CLAUDE.md.
+
+config ZD_MAX_TIMERS
+	int "Maximum simultaneously running zapp timers, desktop-wide"
+	default 4
+	help
+	  Each slot costs one lv_timer, created on first use and thereafter
+	  paused rather than deleted -- see app/src/host/timer_api.c for why
+	  that is a safety property and not a shortcut.
+
+config ZD_TIMER_MIN_MS
+	int "Shortest period a zapp timer will actually run at (ms)"
+	default 50
+	help
+	  Zapps run as callbacks on the thread that draws the screen, so a zapp
+	  asking to be woken every millisecond is asking the desktop to stop
+	  repainting. A shorter period is raised to this rather than refused:
+	  the caller wanted "often", and can have as much of it as is safe.
+
+	  This is not a frame clock and there is deliberately no way to ask for
+	  one.
+
 config ZD_TEXT_PAGE_LINES
 	int "Lines Page Up and Page Down move the caret"
 	default 8

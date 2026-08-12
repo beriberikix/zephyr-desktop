@@ -26,7 +26,7 @@ extern "C" {
 #endif
 
 #define ZD_ABI_MAJOR 0
-#define ZD_ABI_MINOR 6
+#define ZD_ABI_MINOR 7
 
 /**
  * Longest absolute path the desktop will hand back or accept.
@@ -81,6 +81,17 @@ extern "C" {
  */
 #define ZD_NAME_MAX 80
 
+/**
+ * Longest string one grid cell will show, terminator included.
+ *
+ * A knob rather than a member, like ZD_PATH_MAX and unlike ZD_NAME_MAX: it
+ * appears in no struct here, grid_set_cell() copies out of a pointer the caller
+ * owns, and anything longer is TRUNCATED rather than refused -- the same bargain
+ * window titles make. A cell is 16-odd pixels wide and holds a digit or a
+ * marker; there is nothing a longer one could usefully say.
+ */
+#define ZD_CELL_TEXT_MAX 4
+
 /* Opaque handles. A zapp never sees an lv_obj_t, and never sees a struct
  * fs_file_t either -- every one of these is an index plus a generation counter
  * into a desktop-owned table, checked for liveness, kind and ownership on use.
@@ -94,6 +105,8 @@ typedef struct zd_text *zd_text_t;
 typedef struct zd_menu *zd_menu_t;
 /** A scrolling column of selectable single-line rows. Added in 0.6. */
 typedef struct zd_list *zd_list_t;
+/** A rectangular sheet of small, individually drawn cells. Added in 0.7. */
+typedef struct zd_grid *zd_grid_t;
 /** An open file. */
 typedef struct zd_file *zd_file_t;
 /**
@@ -236,6 +249,22 @@ struct zd_dirent {
 #define ZD_DLG_YES    1
 #define ZD_DLG_NO     2
 
+/* --- grid cells -------------------------------------------------------------- */
+
+/*
+ * How one cell is drawn. Not a colour scheme -- the desktop has exactly one of
+ * those -- but the same three-way choice the chrome makes everywhere else, so a
+ * grid of cells looks like the rest of the desktop without a zapp knowing what
+ * a bevel is.
+ */
+#define ZD_CELL_RAISED 0u /**< an unpressed button: the default */
+#define ZD_CELL_SUNKEN 1u /**< pressed in, or uncovered */
+#define ZD_CELL_FLAT   2u /**< no bevel: face colour edge to edge */
+
+/** Which gesture produced a ZD_EV_GRID_CLICK, in ev->grid.action. */
+#define ZD_GRID_PRIMARY   0u /**< a click, or a tap */
+#define ZD_GRID_SECONDARY 1u /**< a press held down; see ZD_EV_GRID_CLICK */
+
 /* --- events --------------------------------------------------------------- */
 
 /*
@@ -373,6 +402,43 @@ enum zd_event_type {
 	 * for the same reason dialog_get_path() exists.
 	 */
 	ZD_EV_LAUNCH_ARG,
+
+	/* --- ABI 0.7 ------------------------------------------------------ */
+
+	/**
+	 * A cell in one of your grids was clicked; ev->grid names the grid, the
+	 * column and the row.
+	 *
+	 * ev->grid.action is ZD_GRID_PRIMARY for an ordinary click and
+	 * ZD_GRID_SECONDARY for a press held down -- which is what a
+	 * pointer-driven desktop would spell as the right button and a touch
+	 * panel cannot. One gesture produces exactly one of the two and never
+	 * both: a press that became a SECONDARY is swallowed when it is
+	 * released, so a zapp does not have to unpick the pair.
+	 *
+	 * Rebuilding the grid from in here is safe and expected -- setting a
+	 * cell writes a model, and the picture is re-derived. It is the same
+	 * contract lists have, arrived at more cheaply: a grid has no child
+	 * objects at all, so there is nothing that could be destroyed under a
+	 * callback standing on it.
+	 */
+	ZD_EV_GRID_CLICK,
+	/**
+	 * A timer you started has come round; ev->timer.id is the value you
+	 * passed to timer_start().
+	 *
+	 * ev->win is NULL. A timer belongs to your instance and not to any one
+	 * window -- an instance may have four of them, and the desktop has no
+	 * business guessing which one you meant. Note that this makes it the
+	 * first event a zapp cannot filter with the usual `ev->win != mine`
+	 * guard, so check the type first.
+	 *
+	 * Delivered from the desktop loop like everything else, which means it
+	 * is late rather than exact: a 1000 ms timer fires no sooner than a
+	 * second and no better than the loop's cadence. Use uptime_ms() to
+	 * measure elapsed time; use this to know when to look.
+	 */
+	ZD_EV_TIMER,
 };
 
 struct zd_event {
@@ -420,6 +486,17 @@ struct zd_event {
 			int16_t index; /**< row, or -1 for "nothing selected" */
 			uint16_t id;   /**< the id you gave that row */
 		} list;
+		/** ZD_EV_GRID_CLICK. Added in 0.7. */
+		struct {
+			zd_grid_t grid;
+			uint8_t col;
+			uint8_t row;
+			uint8_t action; /**< ZD_GRID_PRIMARY or _SECONDARY */
+		} grid;
+		/** ZD_EV_TIMER. Added in 0.7. */
+		struct {
+			uint16_t id;
+		} timer;
 	};
 };
 
@@ -448,6 +525,15 @@ _Static_assert(offsetof(struct zd_event, click) == offsetof(struct zd_event, key
  */
 _Static_assert(offsetof(struct zd_event, click) == offsetof(struct zd_event, list),
 	       "the zd_event union moved when the list member was added");
+/* 0.7 adds one member holding a pointer and one holding a single uint16_t. The
+ * second is the interesting one: it is narrower than anything already in the
+ * union, so it can only fail this if the union's own alignment changed under
+ * it. Both are asserted, because "obviously fine" is what the offsets are for.
+ */
+_Static_assert(offsetof(struct zd_event, click) == offsetof(struct zd_event, grid) &&
+		       offsetof(struct zd_event, click) ==
+			       offsetof(struct zd_event, timer),
+	       "the zd_event union moved when the 0.7 members were added");
 
 struct zd_window_desc {
 	const char *title;
@@ -478,9 +564,17 @@ struct zd_host_api {
 	int (*window_set_title)(zd_zapp_ctx_t ctx, zd_window_t win, const char *title);
 	/**
 	 * Move and resize. A w or h of 0 leaves that dimension alone; anything
-	 * below the desktop's minimum window size is raised to it, so check the
-	 * result with window_get_geometry() rather than assuming you got what
-	 * you asked for. A size change delivers ZD_EV_RESIZED before returning.
+	 * below the desktop's minimum window size is raised to it and anything
+	 * above the usable area is lowered to that, so check the result with
+	 * window_get_geometry() rather than assuming you got what you asked
+	 * for. A size change delivers ZD_EV_RESIZED before returning.
+	 *
+	 * The ceiling is also the answer to "how much room is there?", which
+	 * this ABI deliberately has no other call for. What a zapp may have is
+	 * not the size of the panel, it is whatever the desktop is willing to
+	 * give it -- so ask for far more than could exist, read back what
+	 * arrived, and lay out inside that. Minesweeper sizes its board this
+	 * way.
 	 */
 	int (*window_set_geometry)(zd_zapp_ctx_t ctx, zd_window_t win,
 				   const struct zd_rect *geom);
@@ -952,6 +1046,129 @@ struct zd_host_api {
 	 *         truncated path.
 	 */
 	int (*get_launch_arg)(zd_zapp_ctx_t ctx, char *buf, uint32_t len);
+
+	/* --- ABI 0.7: grids of cells ---------------------------------------- */
+
+	/*
+	 * A rectangle of small square cells, each drawn as a piece of chrome
+	 * with a short string on it, all of them one clickable surface.
+	 *
+	 * The fourth and last shape of content in this ABI, and the one that
+	 * answers a question the other three cannot: how does a zapp draw
+	 * something the desktop has no widget for? A label shows a string, a
+	 * text widget edits one, a list chooses between many -- and none of
+	 * them can put a board, a keypad, a palette or a character map on
+	 * screen. A zapp never sees an lv_obj_t, so before this it could not
+	 * either.
+	 *
+	 * THE CELLS ARE A MODEL AND THE PICTURE IS DERIVED, the same rule
+	 * lists follow. Here it is not a discipline but a fact about the
+	 * implementation: a grid is ONE object that draws every cell itself,
+	 * so there are no child widgets to create, to destroy, or to be
+	 * standing on when a callback rebuilds the board. Setting all
+	 * eighty-one cells from inside ZD_EV_GRID_CLICK is an ordinary thing
+	 * to do.
+	 *
+	 * THE CELL SIZE IS THE DESKTOP'S, not yours, and it is not reported as
+	 * a number for you to multiply. It scales with the board's touch slop
+	 * -- adjacent controls have to be BIGGER rather than claim hit area
+	 * they do not occupy, which is a rule this project learned three times
+	 * -- so a zapp that laid out its own arithmetic would be right on one
+	 * target and wrong on the next. Ask grid_fit() how many cells fit in
+	 * the room you have and grid_measure() how much room a grid would
+	 * take, and never divide anything yourself.
+	 */
+
+	/**
+	 * @param x,y top-left, in the same content-area coordinates a label
+	 *            uses. Size comes from @p cols and @p rows; see
+	 *            grid_measure().
+	 * @return NULL if the table is full or cols*rows exceeds
+	 *         grid_get_capacity().
+	 */
+	zd_grid_t (*grid_create)(zd_zapp_ctx_t ctx, zd_window_t win, int16_t x, int16_t y,
+				 uint8_t cols, uint8_t rows);
+	void (*grid_destroy)(zd_zapp_ctx_t ctx, zd_grid_t grid);
+	int (*grid_set_pos)(zd_zapp_ctx_t ctx, zd_grid_t grid, int16_t x, int16_t y);
+	/** Change the shape. Every cell is reset, as by grid_clear(). */
+	int (*grid_resize)(zd_zapp_ctx_t ctx, zd_grid_t grid, uint8_t cols, uint8_t rows);
+
+	/**
+	 * How many pixels a @p cols by @p rows grid would occupy.
+	 *
+	 * Needs no grid, because it is a question about the desktop rather than
+	 * about any object: ask before creating one, and lay the rest of your
+	 * window out around the answer.
+	 */
+	int (*grid_measure)(zd_zapp_ctx_t ctx, uint8_t cols, uint8_t rows, int16_t *w,
+			    int16_t *h);
+	/**
+	 * The inverse: the largest grid that fits in @p w by @p h.
+	 *
+	 * Either output may come back 0, which means the box is too small for
+	 * even one cell and there is no grid worth creating.
+	 */
+	int (*grid_fit)(zd_zapp_ctx_t ctx, int16_t w, int16_t h, uint8_t *cols,
+			uint8_t *rows);
+	/**
+	 * @return the most cells any one grid may have.
+	 *
+	 * Ask, do not assume -- the same contract text_get_capacity() and
+	 * list_get_capacity() state, and the same reason. Note that it bounds
+	 * cols*rows and says nothing about either on its own.
+	 */
+	int (*grid_get_capacity)(zd_zapp_ctx_t ctx);
+
+	/**
+	 * @brief Say what one cell looks like.
+	 *
+	 * @param text  up to ZD_CELL_TEXT_MAX-1 bytes, truncated beyond that.
+	 *              NULL or "" leaves the cell blank.
+	 * @param style ZD_CELL_RAISED, _SUNKEN or _FLAT.
+	 * @param rgb   0xRRGGBB for @p text. 0 is black, which is the theme's
+	 *              text colour, so a caller with no opinion passes 0.
+	 */
+	int (*grid_set_cell)(zd_zapp_ctx_t ctx, zd_grid_t grid, uint8_t col, uint8_t row,
+			     const char *text, uint32_t style, uint32_t rgb);
+	/** Every cell back to blank and ZD_CELL_RAISED. */
+	int (*grid_clear)(zd_zapp_ctx_t ctx, zd_grid_t grid);
+
+	/* --- ABI 0.7: timers ------------------------------------------------ */
+
+	/*
+	 * The first thing in this ABI that lets a zapp do something when the
+	 * user has done nothing.
+	 *
+	 * Everything before 0.7 was strictly reactive: a zapp ran inside a
+	 * callback or it did not run. That was right for a text editor and a
+	 * file browser, and it is not enough for a clock, a progress bar or a
+	 * game with a stopwatch on it -- none of which can ask "what time is
+	 * it" unless something wakes them up to ask.
+	 *
+	 * A timer belongs to your INSTANCE, not to a window, and is stopped for
+	 * you when your instance goes. It arrives as ZD_EV_TIMER on the desktop
+	 * thread, in the same dispatch path a click uses, with the same rules:
+	 * whatever you may do from a click you may do from here, and nothing
+	 * you may not.
+	 *
+	 * Periods are rounded up to a floor the desktop sets. This is not a
+	 * frame clock and there is no way to ask for one: zapps run as
+	 * callbacks on the thread that draws the screen, so a zapp that wanted
+	 * waking every millisecond would be asking to stop the desktop from
+	 * repainting.
+	 */
+
+	/**
+	 * @param period_ms how often, raised to the desktop's floor if smaller.
+	 * @param id        yours; handed back in ev->timer.id, and what
+	 *                  timer_stop() takes. Starting an id that is already
+	 *                  running re-arms it with the new period rather than
+	 *                  making a second one.
+	 * @return 0, -ENOSPC if there is no timer slot free, or -EINVAL.
+	 */
+	int (*timer_start)(zd_zapp_ctx_t ctx, uint32_t period_ms, uint16_t id);
+	/** Stop it. Stopping one that is not running is not an error. */
+	int (*timer_stop)(zd_zapp_ctx_t ctx, uint16_t id);
 };
 
 /* --- the zapp's side ------------------------------------------------------- */

@@ -82,20 +82,32 @@ static void draw_ring(lv_layer_t *layer, const lv_area_t *a, uint32_t tl, uint32
 	lv_draw_rect(layer, &dsc, &r);
 }
 
+void zd_bevel_draw(lv_layer_t *layer, const lv_area_t *area, zd_bevel_t kind)
+{
+	lv_area_t inner;
+
+	inner.x1 = area->x1 + 1;
+	inner.y1 = area->y1 + 1;
+	inner.x2 = area->x2 - 1;
+	inner.y2 = area->y2 - 1;
+
+	if (kind == ZD_BEVEL_OUT) {
+		draw_ring(layer, area, ZD_C_LIGHT, ZD_C_DARK);
+		draw_ring(layer, &inner, ZD_C_FACE_LIGHT, ZD_C_SHADOW);
+	} else {
+		draw_ring(layer, area, ZD_C_SHADOW, ZD_C_LIGHT);
+		draw_ring(layer, &inner, ZD_C_DARK, ZD_C_FACE_LIGHT);
+	}
+}
+
 static void bevel_draw_cb(lv_event_t *e)
 {
 	zd_bevel_t kind = (zd_bevel_t)(uintptr_t)lv_event_get_user_data(e);
 	lv_obj_t *obj = lv_event_get_target_obj(e);
 	lv_layer_t *layer = lv_event_get_layer(e);
 	lv_area_t outer;
-	lv_area_t inner;
 
 	lv_obj_get_coords(obj, &outer);
-
-	inner.x1 = outer.x1 + 1;
-	inner.y1 = outer.y1 + 1;
-	inner.x2 = outer.x2 - 1;
-	inner.y2 = outer.y2 - 1;
 
 	if (kind == ZD_BEVEL_BUTTON) {
 		/* Reading the state here rather than swapping the callback keeps
@@ -113,13 +125,7 @@ static void bevel_draw_cb(lv_event_t *e)
 			       : ZD_BEVEL_OUT;
 	}
 
-	if (kind == ZD_BEVEL_OUT) {
-		draw_ring(layer, &outer, ZD_C_LIGHT, ZD_C_DARK);
-		draw_ring(layer, &inner, ZD_C_FACE_LIGHT, ZD_C_SHADOW);
-	} else {
-		draw_ring(layer, &outer, ZD_C_SHADOW, ZD_C_LIGHT);
-		draw_ring(layer, &inner, ZD_C_DARK, ZD_C_FACE_LIGHT);
-	}
+	zd_bevel_draw(layer, &outer, kind);
 }
 
 /* LVGL only invalidates on a state change when some *style* property depends on

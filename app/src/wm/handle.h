@@ -39,6 +39,7 @@ enum zd_handle_kind {
 	ZD_HANDLE_TEXT,
 	ZD_HANDLE_MENU,
 	ZD_HANDLE_LIST,
+	ZD_HANDLE_GRID,
 };
 
 /** Register an object and return its handle, or 0 if the table is full. */

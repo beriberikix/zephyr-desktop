@@ -19,10 +19,13 @@
 #include "clipboard.h"
 #include "clock.h"
 #include "fs_api.h"
+#include "grid_api.h"
 #include "host_api.h"
 #include "session.h"
 #include "list_api.h"
 #include "text_api.h"
+#include "timer_api.h"
+#include "../chrome/cellgrid.h"
 #include "../chrome/menu.h"
 #include "../loader/zapp_instance.h"
 #include "../shell/dialog.h"
@@ -872,6 +875,119 @@ static int api_list_get_item_text(zd_zapp_ctx_t ctx, zd_list_t list, int32_t ind
 			    : -EINVAL;
 }
 
+/* --- grids ------------------------------------------------------------------- */
+
+/*
+ * Three of these take no grid at all. grid_measure(), grid_fit() and
+ * grid_get_capacity() are questions about the desktop's chrome rather than
+ * about any object, and they have to be answerable BEFORE a grid exists --
+ * a zapp sizes its window around the answer. They still take a ctx, like
+ * everything else here, so that the day these become syscalls nothing about
+ * them is special.
+ */
+
+static zd_grid_t api_grid_create(zd_zapp_ctx_t ctx, zd_window_t win, int16_t x, int16_t y,
+				 uint8_t cols, uint8_t rows)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+	struct zd_client *client = window_of(ctx, win);
+
+	if (inst == NULL || client == NULL) {
+		return NULL;
+	}
+
+	return (zd_grid_t)zd_grid_create(inst, client, x, y, cols, rows);
+}
+
+static void api_grid_destroy(zd_zapp_ctx_t ctx, zd_grid_t grid)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	if (inst != NULL) {
+		zd_grid_destroy(inst, (uintptr_t)grid);
+	}
+}
+
+static int api_grid_set_pos(zd_zapp_ctx_t ctx, zd_grid_t grid, int16_t x, int16_t y)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_grid_set_pos(inst, (uintptr_t)grid, x, y) : -EINVAL;
+}
+
+static int api_grid_resize(zd_zapp_ctx_t ctx, zd_grid_t grid, uint8_t cols, uint8_t rows)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_grid_resize(inst, (uintptr_t)grid, cols, rows) : -EINVAL;
+}
+
+static int api_grid_measure(zd_zapp_ctx_t ctx, uint8_t cols, uint8_t rows, int16_t *w,
+			    int16_t *h)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	if (inst == NULL || w == NULL || h == NULL) {
+		return -EINVAL;
+	}
+
+	zd_cellgrid_measure(cols, rows, w, h);
+	return 0;
+}
+
+static int api_grid_fit(zd_zapp_ctx_t ctx, int16_t w, int16_t h, uint8_t *cols,
+			uint8_t *rows)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	if (inst == NULL || cols == NULL || rows == NULL) {
+		return -EINVAL;
+	}
+
+	zd_cellgrid_fit(w, h, cols, rows);
+	return 0;
+}
+
+static int api_grid_get_capacity(zd_zapp_ctx_t ctx)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_cellgrid_capacity() : -EINVAL;
+}
+
+static int api_grid_set_cell(zd_zapp_ctx_t ctx, zd_grid_t grid, uint8_t col, uint8_t row,
+			     const char *text, uint32_t style, uint32_t rgb)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL
+		       ? zd_grid_set_cell(inst, (uintptr_t)grid, col, row, text, style, rgb)
+		       : -EINVAL;
+}
+
+static int api_grid_clear(zd_zapp_ctx_t ctx, zd_grid_t grid)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_grid_clear(inst, (uintptr_t)grid) : -EINVAL;
+}
+
+/* --- timers ------------------------------------------------------------------- */
+
+static int api_timer_start(zd_zapp_ctx_t ctx, uint32_t period_ms, uint16_t id)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_timer_start(inst, period_ms, id) : -EINVAL;
+}
+
+static int api_timer_stop(zd_zapp_ctx_t ctx, uint16_t id)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_timer_stop(inst, id) : -EINVAL;
+}
+
 /* --- the tables ------------------------------------------------------------- */
 
 #define ZD_HOST_API_COMMON                                                                 \
@@ -917,7 +1033,13 @@ static int api_list_get_item_text(zd_zapp_ctx_t ctx, zd_list_t list, int32_t ind
 	.list_get_item_text = api_list_get_item_text,                                       \
 	.label_set_pos = api_label_set_pos, .label_destroy = api_label_destroy,             \
 	.dialog_prompt = api_dialog_prompt, .dialog_get_text = api_dialog_get_text,         \
-	.zapp_launch = api_zapp_launch, .get_launch_arg = api_get_launch_arg
+	.zapp_launch = api_zapp_launch, .get_launch_arg = api_get_launch_arg,               \
+	.grid_create = api_grid_create, .grid_destroy = api_grid_destroy,                  \
+	.grid_set_pos = api_grid_set_pos, .grid_resize = api_grid_resize,                  \
+	.grid_measure = api_grid_measure, .grid_fit = api_grid_fit,                        \
+	.grid_get_capacity = api_grid_get_capacity, .grid_set_cell = api_grid_set_cell,    \
+	.grid_clear = api_grid_clear, .timer_start = api_timer_start,                      \
+	.timer_stop = api_timer_stop
 
 static const struct zd_host_api host_api_untrusted = {
 	ZD_HOST_API_COMMON,

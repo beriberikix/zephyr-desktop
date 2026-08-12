@@ -20,6 +20,7 @@
 #include "../host/bus_arb.h"
 #include "../host/fs_api.h"
 #include "../host/host_api.h"
+#include "../host/timer_api.h"
 #include "../shell/dialog.h"
 #include "../wm/handle.h"
 
@@ -695,6 +696,14 @@ static void finish_unload(struct zd_zapp_instance *inst)
 	 * it down before anything else goes.
 	 */
 	zd_dialog_owner_gone(inst);
+
+	/* And any timer it left running, for a sharper version of the same
+	 * argument: a dialog with no owner makes the desktop unclickable, but a
+	 * timer with no owner dispatches into text that unwind_image() is about
+	 * to unmap. This one is not untidiness, it is a use-after-free on a
+	 * clock.
+	 */
+	zd_timer_owner_gone(inst);
 
 	/* Files first, and only after fini() -- which is a zapp's last chance to
 	 * flush. zd_handle_free_all() below only invalidates handles; on its own

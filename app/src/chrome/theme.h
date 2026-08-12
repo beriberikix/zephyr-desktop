@@ -52,6 +52,20 @@ void zd_theme_init(void);
  */
 void zd_bevel_attach(lv_obj_t *obj, zd_bevel_t kind);
 
+/**
+ * @brief Draw one bevel into @p layer over @p area, with no object involved.
+ *
+ * What zd_bevel_attach() hangs on an object, for the caller that has no object
+ * to hang it on. chrome/cellgrid.c draws a hundred of these inside a single
+ * object's draw callback, which is the whole reason it can afford a hundred
+ * cells: a hundred bevelled lv_obj_t would be a hundred objects, each with its
+ * own style, layout and event list.
+ *
+ * ZD_BEVEL_BUTTON is not accepted -- it means "read the object's pressed
+ * state", and there is no object to read.
+ */
+void zd_bevel_draw(lv_layer_t *layer, const lv_area_t *area, zd_bevel_t kind);
+
 /** Flat #C0C0C0 panel: no radius, no border, no padding, not scrollable. */
 extern lv_style_t zd_style_face;
 

@@ -129,6 +129,31 @@ int zd_wm_window_set_geometry(struct zd_client *client, int16_t x, int16_t y, in
 		return -EINVAL;
 	}
 
+	/*
+	 * A ceiling as well as a floor, added in 0.7.
+	 *
+	 * A window taller than the usable area has its resize grip under the
+	 * taskbar and, once moved, its titlebar off the top -- so it can be
+	 * neither resized nor dragged back, which is worse than being refused
+	 * the size. The floor has always worked this way and the ABI already
+	 * tells zapps to check window_get_geometry() rather than assume they
+	 * got what they asked for; this is the same sentence with the other
+	 * inequality.
+	 *
+	 * It is also how a zapp discovers how much room there is at all. There
+	 * is no screen-size call in the ABI and there should not be -- what a
+	 * zapp may have is not the panel, it is whatever the desktop is willing
+	 * to give it. Asking for far too much and reading back what arrived is
+	 * that question, correctly phrased.
+	 */
+	width = MIN(width, (int32_t)lv_display_get_horizontal_resolution(NULL));
+	height = MIN(height, (int32_t)lv_display_get_vertical_resolution(NULL) -
+				     ZD_TASKBAR_H);
+
+	/* The floor is applied after the ceiling, so that on a panel smaller
+	 * than the smallest usable window the window stays usable and hangs
+	 * off the edge, rather than shrinking to something with no titlebar.
+	 */
 	width = MAX(width, ZD_WIN_MIN_W);
 	height = MAX(height, ZD_WIN_MIN_H);
 
@@ -139,6 +164,17 @@ int zd_wm_window_set_geometry(struct zd_client *client, int16_t x, int16_t y, in
 	client->geom.y1 = y;
 	client->geom.x2 = x + width - 1;
 	client->geom.y2 = y + height - 1;
+
+	/* Permanent tracing, and it earns its keep the same way the menu bar's
+	 * title trace does: a window that resized itself is no longer where
+	 * zd_wm_window_create() said it was, and everything driven by
+	 * tools/qemu-drive.py is a screen coordinate. Milestone M spent two
+	 * runs clicking at where a Minesweeper board used to be.
+	 */
+	LOG_DBG("window %u '%s' geometry now %d,%d %dx%d (content at +%d,+%d)", client->id,
+		client->title, (int)client->geom.x1, (int)client->geom.y1, (int)width,
+		(int)height, ZD_FRAME_PAD,
+		ZD_FRAME_PAD + ZD_TITLEBAR_H + ZD_CONTENT_GAP + client->menubar_h);
 
 	/* Only a size change needs the subtree re-laid out; a move is one call. */
 	if (resized) {
