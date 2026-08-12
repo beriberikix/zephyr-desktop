@@ -105,7 +105,8 @@ static struct {
 	enum dlg_kind kind;
 	bool open;
 	bool dismissed;
-	bool relist; /**< the directory changed; refill from the loop */
+	bool relist;      /**< the directory changed; refill from the loop */
+	bool osk_restore; /**< we put the keyboard away; put it back afterwards */
 	char root[ZD_PATH_MAX]; /**< the directory the caller named; the floor */
 	char dir[ZD_PATH_MAX];  /**< where we are now, at or below root */
 	char path[ZD_PATH_MAX];  /**< a file dialog's answer, valid after ZD_EV_DIALOG */
@@ -138,6 +139,15 @@ static void finish(int16_t result)
 	dlg.owner = NULL;
 	lv_obj_add_flag(dlg.panel, LV_OBJ_FLAG_HIDDEN);
 	lv_obj_add_flag(dlg.shade, LV_OBJ_FLAG_HIDDEN);
+
+	/* The taskbar is reachable again, so the keyboard gives its strip back;
+	 * and if we put the keyboard away to make room, it comes back.
+	 */
+	zd_osk_cover_taskbar(false);
+	if (dlg.osk_restore) {
+		dlg.osk_restore = false;
+		zd_osk_set_visible(true);
+	}
 
 	/* Hidden first, dispatched second: whatever the zapp does next, the
 	 * desktop must already believe the dialog is gone.
@@ -172,6 +182,9 @@ static void build_confirm(void);
 static void build_file(void);
 static void build_prompt(void);
 
+/** True while zd_dialog_reap() is building, so a build cannot ask for another. */
+static bool building;
+
 void zd_dialog_reap(void)
 {
 	if (dlg.dismissed) {
@@ -188,6 +201,7 @@ void zd_dialog_reap(void)
 	 */
 	if (want.valid) {
 		want.valid = false;
+		building = true;
 		LOG_DBG("dialog '%s' up (id %u, kind %d)", want.title, dlg.id,
 			(int)want.kind);
 		switch (want.kind) {
@@ -201,6 +215,7 @@ void zd_dialog_reap(void)
 			build_confirm();
 			break;
 		}
+		building = false;
 	}
 
 	/* And a directory the user entered, which is the third deferral in this
@@ -237,6 +252,85 @@ bool zd_dialog_open(void)
 bool zd_dialog_open_for(const struct zd_zapp_instance *inst)
 {
 	return dlg.open && dlg.owner == inst;
+}
+
+/* --- fitting on the screen ------------------------------------------------------- */
+
+/*
+ * How much vertical room a dialog may use.
+ *
+ * The whole screen, less whatever the keyboard is taking. NOT less the taskbar:
+ * a system-modal dialog makes the taskbar unreachable -- the shade eats every
+ * press outside the panel -- so covering it costs nothing, and on a 240 px
+ * panel those 28 px matter. zd_osk_cover_taskbar() hands the keyboard the same
+ * strip for the same reason.
+ *
+ * Before this existed, a Save As box on the CoreS3 came out 249 px tall on a
+ * 240 px screen: negative y, the filename field behind the keys, and the button
+ * row on top of the taskbar and its keyboard toggle.
+ *
+ * Subtracting a height only works because the keyboard is on the bottom edge,
+ * which it is whenever a dialog is up -- request() tells it to take the taskbar
+ * strip, so there is no gap below it for a panel to be placed into.
+ */
+static int32_t avail_h(void)
+{
+	return lv_display_get_vertical_resolution(NULL) - zd_osk_height();
+}
+
+/*
+ * Put the keyboard away for a dialog that has nothing to type into, and
+ * remember to bring it back.
+ *
+ * An Open box and a confirm box are all buttons. Leaving 128 px of keys up in
+ * front of them on a 240 px panel is not a small cosmetic loss -- it is most of
+ * the file list.
+ */
+static void keyboard_aside(void)
+{
+	dlg.osk_restore = zd_osk_visible();
+	zd_osk_set_visible(false);
+}
+
+/*
+ * Lay the open dialog out again, because the keyboard came or went.
+ *
+ * Rebuilt rather than nudged, because what FITS changes and not just where it
+ * sits: on a 240 px panel, putting the keyboard away is the difference between
+ * a Save As with a file list and one without. Without this the Hide key would
+ * visibly do nothing in the one place it matters most.
+ *
+ * Deferred through the same reap as opening, and for the same reason -- this is
+ * called from inside the dispatch of the key that asked for it, and rebuilding
+ * inline would lv_obj_clean() a panel standing on that frame. Fourth customer
+ * in this file; see the header comment.
+ */
+void zd_dialog_relayout(void)
+{
+	if (!dlg.open || want.valid || building) {
+		return;
+	}
+
+	/* Whatever has been typed has to survive. A user who dismissed the
+	 * keyboard to see the file list has not asked to lose the filename they
+	 * just entered with it.
+	 */
+	if (dlg.field != NULL) {
+		const char *s = lv_textarea_get_text(dlg.field);
+
+		(void)strncpy(want.initial, s != NULL ? s : "",
+			      sizeof(want.initial) - 1);
+		want.initial[sizeof(want.initial) - 1] = '\0';
+	}
+
+	want.valid = true;
+}
+
+bool zd_dialog_fits_with_keyboard(void)
+{
+	int32_t need = ZD_FRAME_PAD + TITLE_H + PAD + FIELD_H + PAD + BTN_H + PAD;
+
+	return need <= lv_display_get_vertical_resolution(NULL) - zd_osk_max_height();
 }
 
 /* --- widgets -------------------------------------------------------------------- */
@@ -354,7 +448,7 @@ static lv_obj_t *add_button(int32_t x, int32_t y, const char *label, int16_t res
 static int32_t open_panel(const char *title, int32_t w, int32_t h)
 {
 	int32_t screen_w = lv_display_get_horizontal_resolution(NULL);
-	int32_t screen_h = lv_display_get_vertical_resolution(NULL);
+	int32_t avail = avail_h();
 	lv_obj_t *bar;
 
 	lv_obj_clean(dlg.panel);
@@ -364,8 +458,24 @@ static int32_t open_panel(const char *title, int32_t w, int32_t h)
 	dlg.field = NULL;
 	dlg.relist = false;
 
+	/* The callers shrink what they can to fit; this is the backstop, and it
+	 * clips rather than overflowing because a panel taller than the screen
+	 * gets a negative y and hangs its buttons off the bottom edge.
+	 */
+	if (h > avail) {
+		LOG_WRN("dialog '%s' wants %d px of %d", title, (int)h, (int)avail);
+		h = avail;
+	}
+
 	lv_obj_set_size(dlg.panel, w, h);
-	lv_obj_set_pos(dlg.panel, (screen_w - w) / 2, (screen_h - h) / 3);
+	lv_obj_set_pos(dlg.panel, (screen_w - w) / 2, MAX(0, (avail - h) / 3));
+
+	/* Permanent tracing, same reason the menu titles have it: how a dialog
+	 * got sized is derived geometry, it depends on a keyboard that may or
+	 * may not be up, and a box that is too tall still looks like a box.
+	 */
+	LOG_DBG("dialog '%s' %dx%d in %d px (keyboard %d)", title, (int)w, (int)h,
+		(int)avail, (int)zd_osk_height());
 
 	bar = bare(dlg.panel);
 	lv_obj_set_size(bar, w - 2 * ZD_FRAME_PAD, TITLE_H);
@@ -377,7 +487,17 @@ static int32_t open_panel(const char *title, int32_t w, int32_t h)
 
 	lv_obj_remove_flag(dlg.shade, LV_OBJ_FLAG_HIDDEN);
 	lv_obj_remove_flag(dlg.panel, LV_OBJ_FLAG_HIDDEN);
+
+	/*
+	 * Shade, then keyboard, then panel -- and the middle one is the whole
+	 * point. The overlay is one layer, so "on top" is child order, and the
+	 * shade eats every press that is not on the panel. A keyboard left below
+	 * it can be seen and not used, which is what happened whenever a dialog
+	 * opened while the keyboard was already up: set_visible() had nothing to
+	 * do, so nothing re-raised it.
+	 */
 	lv_obj_move_to_index(dlg.shade, -1);
+	zd_osk_raise();
 	lv_obj_move_to_index(dlg.panel, -1);
 
 	return ZD_FRAME_PAD + TITLE_H + PAD;
@@ -400,6 +520,12 @@ static int request(struct zd_zapp_instance *owner, struct zd_client *client,
 	dlg.open = true;
 	dlg.path[0] = '\0';
 	dlg.text[0] = '\0';
+	want.initial[0] = '\0';
+
+	/* Nothing outside the panel can be pressed from now on, the taskbar
+	 * included, so the keyboard may have its strip.
+	 */
+	zd_osk_cover_taskbar(true);
 
 	want.valid = true;
 	want.kind = kind;
@@ -429,11 +555,22 @@ static void build_confirm(void)
 {
 	int32_t screen_w = lv_display_get_horizontal_resolution(NULL);
 	int32_t w = MIN(screen_w - 24, 272);
-	int32_t body = 3 * 14; /* room for three wrapped lines of montserrat 12 */
-	int32_t h = ZD_FRAME_PAD + TITLE_H + PAD + body + PAD + BTN_H + PAD;
+	int32_t fixed;
+	int32_t body;
+	int32_t h;
 	int32_t y;
 	int32_t x;
 	int n = (want.arg == ZD_DLG_YES_NO_CANCEL) ? 3 : 2;
+
+	/* Nothing to type into a confirm box. */
+	keyboard_aside();
+
+	/* Three wrapped lines of montserrat 12 if they fit, fewer if not, never
+	 * none -- the message is the entire content of this dialog.
+	 */
+	fixed = ZD_FRAME_PAD + TITLE_H + PAD + PAD + BTN_H + PAD;
+	body = CLAMP(avail_h() - fixed, 14, 3 * 14);
+	h = fixed + body;
 
 	y = open_panel(want.title, w, h);
 	text_at(dlg.panel, want.msg, PAD + ZD_FRAME_PAD, y,
@@ -494,15 +631,32 @@ static void build_prompt(void)
 	int32_t screen_w = lv_display_get_horizontal_resolution(NULL);
 	int32_t w = MIN(screen_w - 24, 272);
 	int32_t inner = w - 2 * (PAD + ZD_FRAME_PAD);
-	int32_t body = 2 * 14; /* two wrapped lines of montserrat 12 */
-	int32_t h = ZD_FRAME_PAD + TITLE_H + PAD + body + PAD + FIELD_H + PAD + BTN_H +
-		    PAD;
+	int32_t fixed;
+	int32_t body;
+	int32_t h;
 	int32_t y;
 	int32_t x;
 
+	/* The keyboard first, then lay out in what it leaves. */
+	zd_osk_wanted(true);
+
+	fixed = ZD_FRAME_PAD + TITLE_H + PAD + FIELD_H + PAD + BTN_H + PAD;
+
+	/* Up to two wrapped lines of explanation, and none at all when the keys
+	 * have taken most of the screen. The title already says which prompt
+	 * this is; "Name the new folder:" under a titlebar reading "New Folder"
+	 * is the line that can go.
+	 */
+	body = avail_h() - fixed - PAD;
+	body = body >= 14 ? MIN(body, 2 * 14) : 0;
+	h = fixed + (body > 0 ? body + PAD : 0);
+
 	y = open_panel(want.title, w, h);
-	text_at(dlg.panel, want.msg, PAD + ZD_FRAME_PAD, y, inner, ZD_C_TEXT);
-	y += body + PAD;
+
+	if (body > 0) {
+		text_at(dlg.panel, want.msg, PAD + ZD_FRAME_PAD, y, inner, ZD_C_TEXT);
+		y += body + PAD;
+	}
 
 	make_field(PAD + ZD_FRAME_PAD, y, inner, want.initial);
 
@@ -813,45 +967,78 @@ int zd_dialog_file(struct zd_zapp_instance *owner, struct zd_client *client,
 static void build_file(void)
 {
 	int32_t screen_w = lv_display_get_horizontal_resolution(NULL);
-	int32_t screen_h = lv_display_get_vertical_resolution(NULL);
 	int32_t w = MIN(screen_w - 24, 272);
 	int32_t inner = w - 2 * (PAD + ZD_FRAME_PAD);
 	bool save = (want.arg == ZD_DLG_SAVE);
-	int32_t list_h;
+	int32_t row_h = zd_rowlist_row_h();
+	int32_t fixed;
+	int32_t room;
+	int32_t rows = 0;
+	int32_t list_h = 0;
 	int32_t h;
 	int32_t y;
 	int32_t x;
 
-	/* Six rows, or half the screen on a panel too short for six. The row
-	 * height is the list's, not ours: it scales with the touch slop and
-	 * getting a second copy of that arithmetic wrong is exactly how the
-	 * chrome sizes drifted apart before.
+	/*
+	 * The keyboard first, because everything below is laid out in what it
+	 * leaves. Save needs typing; Open does not, and 128 px of keys in front
+	 * of a file list on a 240 px panel is most of the list.
 	 */
-	list_h = MIN(screen_h / 2, 6 * zd_rowlist_row_h());
-	h = ZD_FRAME_PAD + TITLE_H + PAD + WHERE_H + list_h + PAD +
-	    (save ? FIELD_H + PAD : 0) + BTN_H + PAD;
+	if (save) {
+		zd_osk_wanted(true);
+	} else {
+		keyboard_aside();
+	}
+
+	/*
+	 * What the dialog cannot do without, and then whatever is left over.
+	 *
+	 * The listing is what gives, and in Save mode it can go entirely: you
+	 * type the name, and a Save As with no browser is what Notepad 1.0 had.
+	 * In Open mode losing it leaves nothing but Cancel, so that is logged
+	 * rather than shrugged at -- but Open does not raise the keyboard, so it
+	 * has the whole screen and there is no way to reach that case today.
+	 */
+	fixed = ZD_FRAME_PAD + TITLE_H + PAD + (save ? FIELD_H + PAD : 0) + BTN_H + PAD;
+	room = avail_h() - fixed;
+
+	if (room >= WHERE_H + 2 * row_h) {
+		rows = MIN(6, (room - WHERE_H) / row_h);
+		list_h = rows * row_h;
+	} else if (!save) {
+		LOG_WRN("no room for a listing in '%s'", want.title);
+	}
+
+	h = fixed + (rows > 0 ? WHERE_H + list_h : 0);
 
 	y = open_panel(want.title, w, h);
 
-	/* Which directory this is. Without it, navigation is a list that
-	 * inexplicably changes -- the user has no other way to tell where "up"
-	 * would go, or that there is anywhere to go up to.
-	 */
-	dlg.where = text_at(dlg.panel, "", PAD + ZD_FRAME_PAD, y, inner, ZD_C_TEXT);
-	lv_label_set_long_mode(dlg.where, LV_LABEL_LONG_MODE_DOTS);
-	y += WHERE_H;
+	if (rows > 0) {
+		/* Which directory this is. Without it, navigation is a list that
+		 * inexplicably changes -- the user has no other way to tell
+		 * where "up" would go, or that there is anywhere to go up to.
+		 */
+		dlg.where = text_at(dlg.panel, "", PAD + ZD_FRAME_PAD, y, inner,
+				    ZD_C_TEXT);
+		lv_label_set_long_mode(dlg.where, LV_LABEL_LONG_MODE_DOTS);
+		y += WHERE_H;
 
-	dlg.rl = zd_rowlist_create(dlg.panel, PAD + ZD_FRAME_PAD, y, inner, list_h);
-	if (dlg.rl != NULL) {
-		zd_rowlist_set_cb(dlg.rl, entry_selected, entry_activated, NULL);
-		fill_model();
-		show_where();
+		dlg.rl = zd_rowlist_create(dlg.panel, PAD + ZD_FRAME_PAD, y, inner,
+					   list_h);
+		if (dlg.rl != NULL) {
+			zd_rowlist_set_cb(dlg.rl, entry_selected, entry_activated, NULL);
+			fill_model();
+			show_where();
+		}
+
+		y += list_h + PAD;
 	}
 
-	y += list_h + PAD;
-
 	if (save) {
-		make_field(PAD + ZD_FRAME_PAD, y, inner, "");
+		/* want.initial is empty for a fresh dialog and holds whatever
+		 * was typed when this is a re-layout. See zd_dialog_relayout().
+		 */
+		make_field(PAD + ZD_FRAME_PAD, y, inner, want.initial);
 		y += FIELD_H + PAD;
 	}
 

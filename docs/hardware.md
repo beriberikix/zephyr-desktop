@@ -353,6 +353,53 @@ reaches y=212, exactly the taskbar edge — so with several zapps open, later
 windows are partly hidden behind the taskbar. Cosmetic, not broken, and the drag
 clamp reads the screen size at runtime so windows can always be pulled back.
 
+### The keyboard and a dialog cannot both have the screen
+
+Found on the device, and the clearest example yet of why the sizing constants
+are asserted on the target rather than reasoned about.
+
+The keyboard is `4 * (20 + CONFIG_ZD_TOUCH_SLOP_PX)` = **128 px of a 240 px
+panel**. A Save As box asks for a titlebar, a directory line, six rows of
+listing, a filename field and a button row, which at this board's slop is
+**249 px**. Nothing checked either number against the other, so the panel was
+built 9 px taller than the display, placed at y = -3, and three separate things
+went wrong at once:
+
+- the filename field landed at y≈174, underneath the keys;
+- the button row landed at y≈210, on top of the taskbar — and so on top of the
+  keyboard toggle, the only way to move the keys out of the way;
+- and because the dialog's shade is raised when the dialog opens while
+  `zd_osk_set_visible(true)` does nothing when the keyboard is *already* up,
+  the keyboard ended up **below the shade**: visible, and inert. Every key was
+  a no-op. Cancel was the only control that worked.
+
+Three bugs, none of which QEMU can show, because there the slop is 0 and the
+keyboard is never raised automatically.
+
+What it takes to fix is worth stating as a rule: **anything on the overlay has
+to ask how much of the screen the keyboard is taking.** `zd_osk_height()` is
+that question. Dialogs now size themselves against `screen_h - zd_osk_height()`,
+drop what does not fit in a fixed order, and are rebuilt when the answer
+changes. While one is up the keyboard takes the taskbar's 28 px too, because a
+system-modal dialog makes the taskbar unreachable anyway, and the layering is
+stated explicitly — shade, then keyboard, then panel — rather than being
+whatever moved last.
+
+The keyboard also gained a **Hide** key. The taskbar toggle is a long reach on
+this panel and can be covered; a keyboard you cannot dismiss from the keyboard
+is one that can trap you.
+
+**What this costs on 320x240**, honestly: with the keyboard up there are 112 px,
+and a titlebar plus field plus buttons is 109. So Save As on this board is a
+name and two buttons — no file list, no directory line. Dismissing the keyboard
+rebuilds it with five rows of listing and keeps what you typed, which is what
+the Hide key is for. An Open box never raises the keyboard at all, so it always
+gets its five rows.
+
+`zd_dialog_fits_with_keyboard()` is asserted at boot for exactly the reason the
+button-overlap checks are: both halves of the sum come from a board fragment,
+and only the target knows the screen.
+
 ### The file browser, and rows under a thumb
 
 `zapps/files` puts a scrolling list on a 320x240 panel, and the arithmetic works

@@ -1156,6 +1156,19 @@ good image and reports a pass. The same stale-binary trap as K's filtered build
 log, reached from a new direction: not a hidden error this time, but a build that
 never ran.
 
+**[L] Nothing on the overlay was asking how much screen the keyboard had taken.**
+Found on the CoreS3 after the milestone was otherwise done. A Save As box came
+out 249 px tall on a 240 px display, put its filename field behind the keys and
+its buttons over the taskbar's keyboard toggle -- and, because a dialog raises
+its shade while `zd_osk_set_visible(true)` does nothing when the keyboard is
+*already* up, left the keyboard below that shade: visible and completely inert.
+Three faults in one screen, none of them reachable on QEMU, where the slop is 0
+and the keyboard is never raised automatically. The fix is a rule rather than a
+patch -- `zd_osk_height()` exists so anything on the overlay can ask, dialogs
+size themselves against what is left and are rebuilt when it changes, and the
+modal layering is stated (shade, keyboard, panel) instead of being whatever
+moved last. See `docs/hardware.md`.
+
 **[L] A zapp had never been refused by the permission shim.** Notepad only wrote
 where a picker had already sent it. New Folder in `/system/zapps` is the first
 time a zapp has asked for something it could not have, and it correctly gets

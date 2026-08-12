@@ -31,6 +31,8 @@
 #include "host/storage.h"
 #include "host/text_api.h"
 #include "loader/zapp_instance.h"
+#include "shell/dialog.h"
+#include "shell/osk.h"
 #include "wm/client.h"
 #include "wm/handle.h"
 #include "wm/wm.h"
@@ -318,6 +320,20 @@ static void test_wm(struct zd_wm *wm)
 	lv_obj_update_layout(a->frame);
 	check(!areas_overlap(a->min_btn, a->close_btn),
 	      "the minimise and close buttons do not overlap");
+
+	/*
+	 * And that a dialog still fits once the keyboard has taken its half.
+	 *
+	 * Same category as the overlap checks above and asserted here for the
+	 * same reason: every height involved scales with
+	 * CONFIG_ZD_TOUCH_SLOP_PX, which lives in a board fragment, and the
+	 * screen is whatever the panel is. On the CoreS3 that combination
+	 * produced a Save As box 249 px tall on a 240 px display -- negative y,
+	 * the filename field behind the keys, and the buttons over the taskbar.
+	 * Nothing in the build could have said so; only the target can.
+	 */
+	check(zd_dialog_fits_with_keyboard(),
+	      "a save dialog still fits with the keyboard up");
 	check(!areas_overlap(a->min_btn, a->title_label),
 	      "the minimise button does not cover the title text");
 	check(!areas_overlap(a->grip, a->titlebar),

@@ -66,6 +66,29 @@ void zd_dialog_cancel(void);
 /** Delete the dismissed dialog's widgets. From the desktop loop only. */
 void zd_dialog_reap(void);
 
+/**
+ * @brief Rebuild the open dialog, because the room available to it changed.
+ *
+ * Called when the on-screen keyboard appears or goes. Safe from inside dispatch
+ * -- it records the request and zd_dialog_reap() does the work.
+ */
+void zd_dialog_relayout(void);
+
+/**
+ * @brief Can the tightest useful dialog share the screen with the keyboard?
+ *
+ * A titlebar, one text field and a button row -- Save As with everything
+ * optional removed. If this is false the panel is too short for the chrome the
+ * board's touch slop asks for, and Save As will be clipped rather than merely
+ * cramped.
+ *
+ * Asserted at boot rather than reasoned about, because both halves come from
+ * a board fragment: CONFIG_ZD_TOUCH_SLOP_PX sets every height here and the
+ * keyboard's, and the screen is whatever the panel is. That combination is what
+ * produced a 249 px dialog on a 240 px display.
+ */
+bool zd_dialog_fits_with_keyboard(void);
+
 /** Take the dialog down with the instance that asked for it. */
 void zd_dialog_owner_gone(struct zd_zapp_instance *inst);
 
