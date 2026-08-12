@@ -72,6 +72,18 @@ struct menu {
 	/* submenu */
 	struct menu *bar;
 	lv_obj_t *title;  /**< this submenu's button in the bar */
+	/**
+	 * The title's width, kept rather than read back off LVGL.
+	 *
+	 * The next title is placed after this one, and asking lv_obj_get_width()
+	 * for it answers the pre-layout default -- 130 px -- because nothing has
+	 * laid out yet. Milestone K did exactly that and spaced every menu bar
+	 * by 130 px instead of by its titles: a large dead gap between File and
+	 * Edit, and on a narrow window a second title placed off the end of the
+	 * bar where it cannot be clicked at all. The model is the truth, here as
+	 * everywhere else in this project.
+	 */
+	int16_t title_w;
 	struct menu_item items[CONFIG_ZD_MENU_MAX_ITEMS];
 	uint8_t item_count;
 };
@@ -394,9 +406,12 @@ uintptr_t zd_menu_add_submenu(struct zd_zapp_instance *owner, uintptr_t bar_hand
 
 	live_menus++;
 
+	/* Summed from what we set, never read back: see struct menu::title_w. */
 	for (uint8_t i = 0; i < bar->sub_count; i++) {
-		x += lv_obj_get_width(bar->subs[i]->title);
+		x += bar->subs[i]->title_w;
 	}
+
+	sub->title_w = (int16_t)(label_width(bar->client->menubar, label) + 2 * TITLE_PAD);
 
 	/* Titles sit edge to edge, so they are made wide rather than given hit
 	 * area they do not occupy.
@@ -406,11 +421,17 @@ uintptr_t zd_menu_add_submenu(struct zd_zapp_instance *owner, uintptr_t bar_hand
 	lv_obj_add_style(sub->title, &zd_style_face, LV_PART_MAIN);
 	lv_obj_remove_flag(sub->title, LV_OBJ_FLAG_SCROLLABLE);
 	lv_obj_add_flag(sub->title, LV_OBJ_FLAG_CLICKABLE);
-	lv_obj_set_size(sub->title,
-			label_width(bar->client->menubar, label) + 2 * TITLE_PAD,
-			ZD_MENUBAR_H);
+	lv_obj_set_size(sub->title, sub->title_w, ZD_MENUBAR_H);
 	lv_obj_set_pos(sub->title, x, 0);
 	lv_obj_add_event_cb(sub->title, title_clicked, LV_EVENT_CLICKED, sub);
+
+	/* Permanent tracing. Where a title landed is decided by measuring the
+	 * one before it, which is exactly the kind of derived geometry that has
+	 * already been got wrong twice in this project -- and it is invisible
+	 * from a screenshot, because a title in the wrong place still looks
+	 * like a title. See the hit-slop note in CLAUDE.md.
+	 */
+	LOG_DBG("menu title '%s' at x %d w %d", label, (int)x, (int)sub->title_w);
 
 	text = lv_label_create(sub->title);
 	lv_label_set_text(text, label);

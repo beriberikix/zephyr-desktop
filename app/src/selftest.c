@@ -827,6 +827,27 @@ static void test_menu(struct zd_wm *wm)
 	check(zd_menu_title_coords(bar, 0, &a) && zd_menu_title_coords(bar, 1, &b),
 	      "the bar reports its title rectangles");
 	check(a.x2 < b.x1, "adjacent menu titles do not overlap");
+	/*
+	 * And that they are actually ADJACENT, which is the half this check was
+	 * missing and which cost milestone L an afternoon.
+	 *
+	 * A title's x came from lv_obj_get_width() of the one before it, read
+	 * before any layout pass, so it answered LVGL's default 130 px instead
+	 * of the ~32 px the title really is. Every bar was spaced by 130: a dead
+	 * gap between File and Edit that looked like a wide menu bar, and on a
+	 * window narrower than 260 px a second title placed off the end of the
+	 * bar entirely, where it cannot be clicked. Non-overlap passed happily
+	 * throughout -- two titles a hundred pixels apart do not overlap.
+	 *
+	 * A gap of exactly zero is the assertion, because "titles sit edge to
+	 * edge" is what the sizing comment in chrome/menu.c claims and the only
+	 * version of it that is checkable.
+	 */
+	check(b.x1 == a.x2 + 1,
+	      "and sit edge to edge, so the bar is spaced by its titles and not "
+	      "by an LVGL default");
+	check(b.x2 - client->geom.x1 < lv_area_get_width(&client->geom),
+	      "and the last title is still inside the window");
 	check(lv_area_get_height(&a) >= ZD_MENUBAR_H - 1,
 	      "a menu title is as tall as the bar");
 
