@@ -63,11 +63,18 @@ BUILD_ASSERT(BTN_W >= 44, "a dialog button is too narrow to hit");
  * A dialog that has been asked for but not yet built. See the header comment:
  * the request is recorded here and turned into widgets from the desktop loop.
  */
+enum dlg_kind {
+	DLG_CONFIRM,
+	DLG_FILE,
+	DLG_PROMPT,
+};
+
 static struct {
 	bool valid;
-	bool is_file;
+	enum dlg_kind kind;
 	char title[32];
 	char msg[128];
+	char initial[ZD_NAME_MAX]; /**< prompt only */
 	uint32_t arg; /**< buttons for a confirm, mode for a file dialog */
 } want;
 
@@ -95,13 +102,14 @@ static struct {
 	struct zd_layers *layers;
 
 	uint16_t id;
+	enum dlg_kind kind;
 	bool open;
 	bool dismissed;
-	bool is_file;
 	bool relist; /**< the directory changed; refill from the loop */
 	char root[ZD_PATH_MAX]; /**< the directory the caller named; the floor */
 	char dir[ZD_PATH_MAX];  /**< where we are now, at or below root */
-	char path[ZD_PATH_MAX]; /**< the answer, valid after ZD_EV_DIALOG */
+	char path[ZD_PATH_MAX];  /**< a file dialog's answer, valid after ZD_EV_DIALOG */
+	char text[ZD_NAME_MAX];  /**< a prompt's answer, likewise */
 } dlg;
 
 static bool set_path(const char *name);
@@ -142,11 +150,27 @@ static void finish(int16_t result)
 void zd_dialog_cancel(void)
 {
 	dlg.path[0] = '\0';
+	dlg.text[0] = '\0';
 	finish(ZD_DLG_CANCEL);
+}
+
+/** Copy the prompt field into dlg.text. @return false if there is nothing in it. */
+static bool take_prompt_text(void)
+{
+	const char *s = dlg.field != NULL ? lv_textarea_get_text(dlg.field) : NULL;
+
+	if (s == NULL || s[0] == '\0') {
+		return false;
+	}
+
+	(void)strncpy(dlg.text, s, sizeof(dlg.text) - 1);
+	dlg.text[sizeof(dlg.text) - 1] = '\0';
+	return true;
 }
 
 static void build_confirm(void);
 static void build_file(void);
+static void build_prompt(void);
 
 void zd_dialog_reap(void)
 {
@@ -164,12 +188,18 @@ void zd_dialog_reap(void)
 	 */
 	if (want.valid) {
 		want.valid = false;
-		LOG_DBG("dialog '%s' up (id %u, %s)", want.title, dlg.id,
-			want.is_file ? "file" : "confirm");
-		if (want.is_file) {
+		LOG_DBG("dialog '%s' up (id %u, kind %d)", want.title, dlg.id,
+			(int)want.kind);
+		switch (want.kind) {
+		case DLG_FILE:
 			build_file();
-		} else {
+			break;
+		case DLG_PROMPT:
+			build_prompt();
+			break;
+		case DLG_CONFIRM:
 			build_confirm();
+			break;
 		}
 	}
 
@@ -247,7 +277,7 @@ static void button_clicked(lv_event_t *e)
 	/* In a file dialog, OK means "the name in the box", which the list and
 	 * the field have been keeping up to date between them.
 	 */
-	if (dlg.is_file && dlg.field != NULL) {
+	if (dlg.kind == DLG_FILE && dlg.field != NULL) {
 		const char *name = lv_textarea_get_text(dlg.field);
 
 		if (name == NULL || name[0] == '\0' || !set_path(name)) {
@@ -255,11 +285,47 @@ static void button_clicked(lv_event_t *e)
 		}
 	}
 
-	if (dlg.is_file && dlg.path[0] == '\0') {
+	if (dlg.kind == DLG_FILE && dlg.path[0] == '\0') {
 		return;
 	}
 
+	if (dlg.kind == DLG_PROMPT && !take_prompt_text()) {
+		return; /* an empty answer is not an answer */
+	}
+
 	finish(result);
+}
+
+/*
+ * The one-line editable field, shared by Save As and the prompt.
+ *
+ * Written out longhand rather than reaching for text_create(): that is the
+ * zapp-facing widget, and it wants an owner, a client and a handle, none of
+ * which a dialog has. What the two do share is zd_text_key_obj(), so editing
+ * behaves identically in a dialog and in Notepad without either knowing.
+ */
+static void make_field(int32_t x, int32_t y, int32_t w, const char *initial)
+{
+	dlg.field = lv_textarea_create(dlg.panel);
+	lv_obj_remove_style_all(dlg.field);
+	lv_obj_set_size(dlg.field, w, FIELD_H);
+	lv_obj_set_pos(dlg.field, x, y);
+	lv_textarea_set_one_line(dlg.field, true);
+	lv_textarea_set_max_length(dlg.field, ZD_NAME_MAX - 1);
+	lv_textarea_set_cursor_click_pos(dlg.field, true);
+	lv_textarea_set_text(dlg.field, initial != NULL ? initial : "");
+	lv_obj_set_style_bg_color(dlg.field, lv_color_hex(ZD_C_LIGHT), LV_PART_MAIN);
+	lv_obj_set_style_bg_opa(dlg.field, LV_OPA_COVER, LV_PART_MAIN);
+	lv_obj_set_style_text_color(dlg.field, lv_color_hex(ZD_C_TEXT), LV_PART_MAIN);
+	lv_obj_set_style_text_font(dlg.field, &lv_font_montserrat_12, LV_PART_MAIN);
+	lv_obj_set_style_pad_all(dlg.field, 2, LV_PART_MAIN);
+	lv_obj_set_style_bg_color(dlg.field, lv_color_hex(ZD_C_TEXT), LV_PART_CURSOR);
+	lv_obj_set_style_bg_opa(dlg.field, LV_OPA_COVER, LV_PART_CURSOR);
+	lv_obj_set_style_width(dlg.field, 1, LV_PART_CURSOR);
+	zd_bevel_attach(dlg.field, ZD_BEVEL_IN);
+
+	/* There is a field to type into and possibly no keyboard. */
+	zd_osk_wanted(true);
 }
 
 static lv_obj_t *add_button(int32_t x, int32_t y, const char *label, int16_t result)
@@ -321,7 +387,7 @@ static int32_t open_panel(const char *title, int32_t w, int32_t h)
 
 /** Record what was asked for. The widgets happen in zd_dialog_reap(). */
 static int request(struct zd_zapp_instance *owner, struct zd_client *client,
-		   const char *title, uint16_t id, bool is_file)
+		   const char *title, uint16_t id, enum dlg_kind kind)
 {
 	if (dlg.open) {
 		return -EBUSY; /* one at a time, and system modal means system */
@@ -330,12 +396,13 @@ static int request(struct zd_zapp_instance *owner, struct zd_client *client,
 	dlg.owner = owner;
 	dlg.client = client;
 	dlg.id = id;
-	dlg.is_file = is_file;
+	dlg.kind = kind;
 	dlg.open = true;
 	dlg.path[0] = '\0';
+	dlg.text[0] = '\0';
 
 	want.valid = true;
-	want.is_file = is_file;
+	want.kind = kind;
 	(void)strncpy(want.title, title != NULL ? title : "", sizeof(want.title) - 1);
 	want.title[sizeof(want.title) - 1] = '\0';
 
@@ -345,7 +412,7 @@ static int request(struct zd_zapp_instance *owner, struct zd_client *client,
 int zd_dialog_confirm(struct zd_zapp_instance *owner, struct zd_client *client,
 		      const char *title, const char *msg, uint32_t buttons, uint16_t id)
 {
-	int ret = request(owner, client, title, id, false);
+	int ret = request(owner, client, title, id, DLG_CONFIRM);
 
 	if (ret != 0) {
 		return ret;
@@ -389,6 +456,76 @@ static void build_confirm(void)
 	}
 
 	add_button(x, y, "Cancel", ZD_DLG_CANCEL);
+}
+
+/* --- prompt ------------------------------------------------------------------------ */
+
+/*
+ * The third dialog kind: one line of text, OK and Cancel.
+ *
+ * Confirm answers a question the desktop asked; the picker answers "which of
+ * these". Neither can answer "what shall it be called", which is what New
+ * Folder and Rename need -- and what Save As's field has been quietly doing all
+ * along for a single hardcoded case.
+ *
+ * An empty box is not an answer: OK stays inert rather than producing a file
+ * called "". Cancel is how you decline.
+ */
+int zd_dialog_prompt(struct zd_zapp_instance *owner, struct zd_client *client,
+		     const char *title, const char *msg, const char *initial, uint16_t id)
+{
+	int ret = request(owner, client, title, id, DLG_PROMPT);
+
+	if (ret != 0) {
+		return ret;
+	}
+
+	(void)strncpy(want.msg, msg != NULL ? msg : "", sizeof(want.msg) - 1);
+	want.msg[sizeof(want.msg) - 1] = '\0';
+	(void)strncpy(want.initial, initial != NULL ? initial : "",
+		      sizeof(want.initial) - 1);
+	want.initial[sizeof(want.initial) - 1] = '\0';
+
+	return 0;
+}
+
+static void build_prompt(void)
+{
+	int32_t screen_w = lv_display_get_horizontal_resolution(NULL);
+	int32_t w = MIN(screen_w - 24, 272);
+	int32_t inner = w - 2 * (PAD + ZD_FRAME_PAD);
+	int32_t body = 2 * 14; /* two wrapped lines of montserrat 12 */
+	int32_t h = ZD_FRAME_PAD + TITLE_H + PAD + body + PAD + FIELD_H + PAD + BTN_H +
+		    PAD;
+	int32_t y;
+	int32_t x;
+
+	y = open_panel(want.title, w, h);
+	text_at(dlg.panel, want.msg, PAD + ZD_FRAME_PAD, y, inner, ZD_C_TEXT);
+	y += body + PAD;
+
+	make_field(PAD + ZD_FRAME_PAD, y, inner, want.initial);
+
+	y = h - PAD - BTN_H;
+	x = w - PAD - ZD_FRAME_PAD - 2 * BTN_W - BTN_GAP;
+	add_button(x, y, "OK", ZD_DLG_OK);
+	add_button(x + BTN_W + BTN_GAP, y, "Cancel", ZD_DLG_CANCEL);
+}
+
+int zd_dialog_get_text(struct zd_zapp_instance *owner, char *buf, uint32_t len)
+{
+	ARG_UNUSED(owner);
+
+	if (buf == NULL || len == 0) {
+		return -EINVAL;
+	}
+
+	if (strlen(dlg.text) >= len) {
+		return -ENOSPC;
+	}
+
+	strcpy(buf, dlg.text);
+	return (int)strlen(buf);
 }
 
 /* --- file picker ------------------------------------------------------------------ */
@@ -660,7 +797,7 @@ int zd_dialog_file(struct zd_zapp_instance *owner, struct zd_client *client,
 		return -EINVAL;
 	}
 
-	ret = request(owner, client, title, id, true);
+	ret = request(owner, client, title, id, DLG_FILE);
 	if (ret != 0) {
 		return ret;
 	}
@@ -714,29 +851,7 @@ static void build_file(void)
 	y += list_h + PAD;
 
 	if (save) {
-		dlg.field = lv_textarea_create(dlg.panel);
-		lv_obj_remove_style_all(dlg.field);
-		lv_obj_set_size(dlg.field, inner, FIELD_H);
-		lv_obj_set_pos(dlg.field, PAD + ZD_FRAME_PAD, y);
-		lv_textarea_set_one_line(dlg.field, true);
-		lv_textarea_set_max_length(dlg.field, ZD_NAME_MAX - 1);
-		lv_textarea_set_cursor_click_pos(dlg.field, true);
-		lv_textarea_set_text(dlg.field, "");
-		lv_obj_set_style_bg_color(dlg.field, lv_color_hex(ZD_C_LIGHT), LV_PART_MAIN);
-		lv_obj_set_style_bg_opa(dlg.field, LV_OPA_COVER, LV_PART_MAIN);
-		lv_obj_set_style_text_color(dlg.field, lv_color_hex(ZD_C_TEXT),
-					    LV_PART_MAIN);
-		lv_obj_set_style_text_font(dlg.field, &lv_font_montserrat_12, LV_PART_MAIN);
-		lv_obj_set_style_pad_all(dlg.field, 2, LV_PART_MAIN);
-		lv_obj_set_style_bg_color(dlg.field, lv_color_hex(ZD_C_TEXT),
-					  LV_PART_CURSOR);
-		lv_obj_set_style_bg_opa(dlg.field, LV_OPA_COVER, LV_PART_CURSOR);
-		lv_obj_set_style_width(dlg.field, 1, LV_PART_CURSOR);
-		zd_bevel_attach(dlg.field, ZD_BEVEL_IN);
-
-		/* There is a field to type into and possibly no keyboard. */
-		zd_osk_wanted(true);
-
+		make_field(PAD + ZD_FRAME_PAD, y, inner, "");
 		y += FIELD_H + PAD;
 	}
 
@@ -788,10 +903,17 @@ bool zd_dialog_key(uint32_t code, uint32_t unicode, uint16_t mods)
 		 * single-line: zd_text_key_obj() declines Enter there rather
 		 * than inserting a newline into a filename.
 		 */
-		if (dlg.is_file && dlg.field != NULL) {
+		if (dlg.kind == DLG_FILE && dlg.field != NULL) {
 			const char *name = lv_textarea_get_text(dlg.field);
 
 			if (name != NULL && name[0] != '\0' && set_path(name)) {
+				finish(ZD_DLG_OK);
+			}
+			return true;
+		}
+
+		if (dlg.kind == DLG_PROMPT) {
+			if (take_prompt_text()) {
 				finish(ZD_DLG_OK);
 			}
 			return true;
@@ -805,7 +927,7 @@ bool zd_dialog_key(uint32_t code, uint32_t unicode, uint16_t mods)
 			return true;
 		}
 
-		if (!dlg.is_file) {
+		if (dlg.kind != DLG_FILE) {
 			finish(ZD_DLG_OK);
 		}
 		return true;

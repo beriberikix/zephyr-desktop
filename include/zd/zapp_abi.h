@@ -882,6 +882,30 @@ struct zd_host_api {
 	 */
 	int (*label_set_pos)(zd_zapp_ctx_t ctx, zd_label_t label, int16_t x, int16_t y);
 	void (*label_destroy)(zd_zapp_ctx_t ctx, zd_label_t label);
+
+	/* --- ABI 0.6: asking for one line of text --------------------------- */
+
+	/**
+	 * @brief The third dialog kind: a message, a text field, OK and Cancel.
+	 *
+	 * dialog_confirm() answers a question the desktop asked and
+	 * dialog_file() answers "which of these"; neither can answer "what
+	 * shall it be called", which is what naming a new folder needs.
+	 *
+	 * Asynchronous like the other two. The answer arrives as ZD_EV_DIALOG
+	 * with ZD_DLG_OK or ZD_DLG_CANCEL, and the text comes back from
+	 * dialog_get_text() -- the event says what happened, a call says how
+	 * much, the same split dialog_get_path() uses.
+	 *
+	 * @param initial what the field starts with; NULL or "" for empty.
+	 *
+	 * An empty field is not an answer: OK does nothing until something is
+	 * typed. Cancel is how the user declines.
+	 */
+	int (*dialog_prompt)(zd_zapp_ctx_t ctx, const char *title, const char *msg,
+			     const char *initial, uint16_t id);
+	/** What a prompt produced. Empty after a cancel. -ENOSPC, never a truncation. */
+	int (*dialog_get_text)(zd_zapp_ctx_t ctx, char *buf, uint32_t len);
 };
 
 /* --- the zapp's side ------------------------------------------------------- */

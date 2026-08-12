@@ -44,6 +44,10 @@ int zd_dialog_confirm(struct zd_zapp_instance *owner, struct zd_client *client,
 int zd_dialog_file(struct zd_zapp_instance *owner, struct zd_client *client,
 		   const char *title, enum zd_dir dir, uint32_t mode, uint16_t id);
 
+int zd_dialog_prompt(struct zd_zapp_instance *owner, struct zd_client *client,
+		     const char *title, const char *msg, const char *initial,
+		     uint16_t id);
+
 /**
  * @brief The path the last file dialog produced.
  *
@@ -52,6 +56,9 @@ int zd_dialog_file(struct zd_zapp_instance *owner, struct zd_client *client,
  * how much" shape the rest of the ABI uses.
  */
 int zd_dialog_get_path(struct zd_zapp_instance *owner, char *buf, uint32_t len);
+
+/** The text the last prompt produced. Empty after a cancel. */
+int zd_dialog_get_text(struct zd_zapp_instance *owner, char *buf, uint32_t len);
 
 /** Dismiss whatever is open, answering CANCEL. Safe from inside dispatch. */
 void zd_dialog_cancel(void);

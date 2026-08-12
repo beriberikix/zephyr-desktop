@@ -486,6 +486,25 @@ static int api_dialog_file(zd_zapp_ctx_t ctx, const char *title, enum zd_dir dir
 	return zd_dialog_file(inst, inst->wm->focused, title, dir, mode, id);
 }
 
+static int api_dialog_prompt(zd_zapp_ctx_t ctx, const char *title, const char *msg,
+			     const char *initial, uint16_t id)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	if (inst == NULL) {
+		return -EINVAL;
+	}
+
+	return zd_dialog_prompt(inst, inst->wm->focused, title, msg, initial, id);
+}
+
+static int api_dialog_get_text(zd_zapp_ctx_t ctx, char *buf, uint32_t len)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_dialog_get_text(inst, buf, len) : -EINVAL;
+}
+
 static int api_dialog_get_path(zd_zapp_ctx_t ctx, char *buf, uint32_t len)
 {
 	struct zd_zapp_instance *inst = instance_of(ctx);
@@ -876,7 +895,8 @@ static int api_list_get_item_text(zd_zapp_ctx_t ctx, zd_list_t list, int32_t ind
 	.list_set_selected = api_list_set_selected,                                         \
 	.list_get_item_id = api_list_get_item_id,                                           \
 	.list_get_item_text = api_list_get_item_text,                                       \
-	.label_set_pos = api_label_set_pos, .label_destroy = api_label_destroy
+	.label_set_pos = api_label_set_pos, .label_destroy = api_label_destroy,             \
+	.dialog_prompt = api_dialog_prompt, .dialog_get_text = api_dialog_get_text
 
 static const struct zd_host_api host_api_untrusted = {
 	ZD_HOST_API_COMMON,
