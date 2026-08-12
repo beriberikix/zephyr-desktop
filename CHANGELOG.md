@@ -9,6 +9,15 @@ Versions are the *desktop's*. The **zapp ABI has its own number**, currently
 0.7, and the two move independently: the ABI is what a `.llext` is compiled
 against and is governed by the append-only rules in [docs/abi.md](docs/abi.md).
 
+## Unreleased
+
+- The build-identity comment in `app/CMakeLists.txt` overstated what
+  `CMAKE_CONFIGURE_DEPENDS` covers. Creating a tag touches neither `HEAD` nor
+  the index, so an incremental build immediately after `git tag` keeps the
+  previous `git describe` string. Release builds are unaffected —
+  `mkrelease.sh` passes `-p always` — and the comment now says so instead of
+  implying the string can never be stale.
+
 ## v0.1.0 — 2026-08-12
 
 The first release. Thirteen milestones, lettered A to M, got here; this file

@@ -39,7 +39,7 @@ set(ZD_ZAPPS   ${CMAKE_CURRENT_SOURCE_DIR}/../zapps)
 # "is the board running the image I just built?" is otherwise unanswerable, and
 # milestone J hand-tested a stale binary twice for exactly that reason.
 #
-# Two honest limits, stated rather than papered over:
+# Three honest limits, stated rather than papered over:
 #
 #   - this identifies the COMMIT, not the working tree. Uncommitted edits are
 #     invisible here; the version line tells you which release you are near, not
@@ -48,6 +48,18 @@ set(ZD_ZAPPS   ${CMAKE_CURRENT_SOURCE_DIR}/../zapps)
 #     re-runs configure when HEAD or the index moves, which covers commit,
 #     checkout and rebase -- the cases where the string would otherwise be a
 #     confident lie.
+#   - **creating a tag is not one of those cases.** `git tag v0.1.0` writes
+#     .git/refs/tags/v0.1.0 and touches neither HEAD nor the index, so an
+#     incremental build straight after tagging keeps the previous string and
+#     says a bare commit where it should say the release. Measured, not
+#     assumed: with the build up to date, creating a tag and rebuilding
+#     produces "ninja: no work to do" and no reconfigure.
+#
+#     Watching the refs directory is not reliable across generators, so the
+#     answer is the one release builds already take: tools/mkrelease.sh passes
+#     -p always, and a pristine build has no stale configure to inherit. If you
+#     tag by hand and want the banner to agree, build pristine or touch this
+#     file.
 include(git)
 git_describe(${CMAKE_CURRENT_SOURCE_DIR} ZD_BUILD_ID)
 if(NOT ZD_BUILD_ID)
