@@ -387,6 +387,11 @@ two buttons, and of the grip and the titlebar, do not overlap. It is checked at
 runtime rather than reasoned about at review time because the value that breaks
 it lives in a board fragment, and only one of the three boards sets it.
 
+The corollary bit me immediately afterwards: **a control that cannot have slop
+must get the allowance as height instead, and there has to be somewhere for that
+height to go.** The taskbar window buttons had neither, and were untappable until
+their strip was extended to the bottom of the screen.
+
 **2. The system workqueue stack, which is the real one.** The touch driver's
 work runs on the system workqueue, whose stack defaults to **1 KB**. With
 `CONFIG_LOG_MODE_IMMEDIATE=y` -- which this project sets so that boot-time
@@ -449,12 +454,34 @@ Every one of those calls borrows GPIO35 from the display and gives it back
 round trip works on a board where upstream's answer is to turn the screen off.
 The file survives a power cycle and is readable on a laptop.
 
-**Flashed and self-checked but not yet driven by hand (ABI 0.4):** window resize
-by the corner grip, the minimise button, the taskbar window list, and the close
-handshake. All 51 boot checks pass on the board, which covers the model — the
-mapped/unmapped distinction, the resize payload, the two-click force close and
-the chrome's non-overlapping hit rectangles at `CONFIG_ZD_TOUCH_SLOP_PX=12`. What
-a selftest cannot answer is whether a 24 px grip and a 30 px titlebar are
-comfortable under a thumb on a 320×240 panel, or whether four taskbar buttons at
-~47 px each are distinguishable. Try it and write down what is actually wrong,
-rather than shipping numbers that were only ever reasoned about.
+...and, since ABI 0.4, the whole of window management by thumb: dragging a
+titlebar, the minimise button, restoring from the taskbar button, the corner
+grip, and closing through the handshake — `[Notes] close requested; nothing
+unsaved` followed by a clean reap, with the client slab walking back to its
+starting count. 51 boot checks pass on the board too, including the ones that
+assert the chrome's hit rectangles do not overlap at
+`CONFIG_ZD_TOUCH_SLOP_PX=12`.
+
+Two of those did not work on the first try, and neither failure could occur on
+QEMU:
+
+- **Windows would not drag.** Not a WM bug — a cost one. See the `[J]` note in
+  `docs/design.md`: a move had started re-laying out the whole client subtree,
+  the loop fell behind the FT5336's 20 ms poll, and the input queue overflowed
+  with `<wrn> input: Event dropped, queue full`. The warning is the thing to
+  watch for; it means the desktop loop, not the driver, is the bottleneck.
+- **Taskbar buttons could not be tapped.** They were 20 px tall at screen
+  y 216..235 with no `ext_click_area` — deliberately, because adjacent controls
+  cannot have it — which is precisely the geometry that made the launcher button
+  unreachable back in the first touch session. Height was the only allowance
+  available, so the window-list strip now runs flush to the bottom edge of the
+  screen.
+
+**On the size of touch targets, honestly.** Two instrumented menu taps: one aimed
+at the middle of a 30 px row read 11 px low (y=173 in a row spanning 148..177),
+the next read dead centre (y=162). So this is scatter, not a constant offset a
+calibration constant would remove — an earlier session's single Start-button
+measurement made it look systematic and it is not. The practical consequence is
+the same either way: **a 30 px row is about the smallest thing worth putting
+under a thumb here, and anything at the very bottom edge of the panel needs to
+reach y=239.** Rows any smaller lose taps to the neighbour below.

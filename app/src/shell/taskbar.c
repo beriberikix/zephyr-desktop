@@ -131,5 +131,17 @@ void zd_taskbar_list_region(lv_area_t *out)
 	out->x1 = EDGE_PAD + LAUNCHER_W + GAP;
 	out->y1 = ITEM_Y;
 	out->x2 = screen_w - CLOCK_W - EDGE_PAD - GAP - 1;
-	out->y2 = ITEM_Y + ITEM_H - 1;
+
+	/*
+	 * Flush with the bottom of the panel -- and so with the bottom of the
+	 * screen -- rather than inset like the launcher and the clock.
+	 *
+	 * Those two get their touch allowance from ext_click_area, which these
+	 * cannot have: they sit edge to edge in a row, and slop on adjacent
+	 * controls overlaps, handing every tap to the rightmost one. Height is
+	 * the only allowance left, and it has to go downward, because that is
+	 * the direction this panel's taps miss in -- a press aimed at the
+	 * launcher button (drawn to y 236) reads y=239. See docs/hardware.md.
+	 */
+	out->y2 = ZD_TASKBAR_H - 1;
 }

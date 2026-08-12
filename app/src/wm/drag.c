@@ -47,7 +47,10 @@ static void move_to(struct zd_client *client, int32_t x, int32_t y)
 	client->geom.x2 = x + w - 1;
 	client->geom.y2 = y + h - 1;
 
-	zd_client_apply_geom(client);
+	/* Position only. A move changes nothing inside the frame, and this runs
+	 * once per pointer sample.
+	 */
+	zd_client_apply_pos(client);
 }
 
 /*

@@ -158,6 +158,15 @@ void zd_client_destroy_widgets(struct zd_client *client)
 	client->grip = NULL;
 }
 
+void zd_client_apply_pos(struct zd_client *client)
+{
+	/* The frame's children are positioned relative to it, so moving the
+	 * frame moves the window. Nothing inside needs to be touched, and during
+	 * a drag that difference is the whole cost of the gesture.
+	 */
+	lv_obj_set_pos(client->frame, client->geom.x1, client->geom.y1);
+}
+
 void zd_client_apply_geom(struct zd_client *client)
 {
 	/* Re-lays out everything, not just the frame's position: this is the one

@@ -134,7 +134,13 @@ int zd_wm_window_set_geometry(struct zd_client *client, int16_t x, int16_t y, in
 	client->geom.y1 = y;
 	client->geom.x2 = x + width - 1;
 	client->geom.y2 = y + height - 1;
-	zd_client_apply_geom(client);
+
+	/* Only a size change needs the subtree re-laid out; a move is one call. */
+	if (resized) {
+		zd_client_apply_geom(client);
+	} else {
+		zd_client_apply_pos(client);
+	}
 
 	if (resized) {
 		zd_wm_notify_resized(client);

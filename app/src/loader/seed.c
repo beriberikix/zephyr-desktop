@@ -6,6 +6,7 @@
 
 #include <errno.h>
 #include <stdio.h>
+#include <string.h>
 
 #include <zephyr/kernel.h>
 #include <zephyr/fs/fs.h>
@@ -44,11 +45,54 @@ static const struct builtin builtins[] = {
 	{ .name = "badabi", .data = badabi_llext, .size = sizeof(badabi_llext) },
 };
 
+/*
+ * Is the installed copy byte-for-byte the built-in one?
+ *
+ * Compared properly rather than by size, which is what this used to do and
+ * which is not the same question. A rebuilt zapp that happens to land on the
+ * same length -- an ABI minor bump changes one constant in the manifest -- was
+ * silently kept, so the desktop ran last build's extension against this build's
+ * host and reported it in a log line nobody was reading. Fifteen kilobytes of
+ * reads at boot is a cheap price for never wondering which binary is running.
+ */
+static bool same_content(const char *path, const struct builtin *app)
+{
+	struct fs_dirent entry;
+	struct fs_file_t file;
+	uint8_t buf[128];
+	size_t off = 0;
+	bool same = true;
+
+	if (fs_stat(path, &entry) != 0 || entry.size != app->size) {
+		return false;
+	}
+
+	fs_file_t_init(&file);
+	if (fs_open(&file, path, FS_O_READ) != 0) {
+		return false;
+	}
+
+	while (off < app->size) {
+		size_t want = MIN(sizeof(buf), app->size - off);
+		ssize_t got = fs_read(&file, buf, want);
+
+		if (got <= 0 || memcmp(buf, app->data + off, (size_t)got) != 0) {
+			same = false;
+			break;
+		}
+		off += (size_t)got;
+	}
+
+	fs_close(&file);
+	return same;
+}
+
 static int install_one(const struct builtin *app)
 {
 	char path[ZD_PATH_MAX];
 	struct fs_dirent entry;
 	struct fs_file_t file;
+	bool existed;
 	ssize_t written;
 	int ret;
 
@@ -58,10 +102,9 @@ static int install_one(const struct builtin *app)
 		return -ENAMETOOLONG;
 	}
 
-	/* Already installed and the right size: leave it alone, so a file the
-	 * user replaced by hand survives a reboot.
-	 */
-	if (fs_stat(path, &entry) == 0 && entry.size == app->size) {
+	existed = fs_stat(path, &entry) == 0;
+
+	if (existed && same_content(path, app)) {
 		LOG_DBG("%s already installed", path);
 		return 0;
 	}
@@ -81,7 +124,16 @@ static int install_one(const struct builtin *app)
 		return -EIO;
 	}
 
-	LOG_INF("installed %s (%zu bytes)", path, app->size);
+	/* Loud when it replaces something: overwriting a file already on the
+	 * volume is the one thing here a user could be surprised by, and the
+	 * surprise they get otherwise is a stale zapp.
+	 */
+	if (existed) {
+		LOG_WRN("replaced %s with the built-in copy (%zu bytes)", path, app->size);
+	} else {
+		LOG_INF("installed %s (%zu bytes)", path, app->size);
+	}
+
 	return 0;
 }
 

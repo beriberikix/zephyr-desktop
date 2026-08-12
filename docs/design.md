@@ -925,6 +925,25 @@ where the slop is 0 the chrome is byte-identical to before. A boot check asserts
 rectangles do not overlap, on the target, because the value that breaks it lives in a
 board fragment.
 
+**[J] A move is not a resize, and the difference is a frame budget.** Factoring the chrome
+layout into `layout_subtree()` and having `zd_client_apply_geom()` call it is right for
+resize and quietly wrong for drag: a move went from one `lv_obj_set_pos()` to eight LVGL
+calls and three layout invalidations, *per pointer sample*. On the CoreS3 the FT5336 polls
+every 20 ms, the desktop loop fell behind, and the input queue overflowed —
+`<wrn> input: Event dropped, queue full` — so windows would not drag at all. Invisible on
+QEMU, where the pointer is cheap and the loop has slack. Split into `zd_client_apply_pos()`
+and `zd_client_apply_geom()`. The general shape: a refactor that makes the *expensive* case
+correct can make the *common* case unaffordable, and only the slowest target says so.
+
+**[J] The seed compared file sizes, not file contents.** `install_one()` skipped a zapp
+already on the volume if `entry.size` matched, so a rebuilt `notes.llext` that happened to
+land on the same 5096 bytes was never replaced — the board ran the previous build's
+extension against the new host and said so once, in
+`launched 'Notes' instance 4 (ABI 0.3)`, in a log line nobody was reading. Two rounds of
+hand-testing measured the wrong binary. It now reads the installed copy back and compares
+it, and logs at `WRN` when it replaces something. Equal length is not equal content, and a
+staleness check that can be wrong silently is worse than none.
+
 **[J] The deferred-destroy rule has a second customer.** Clicking a taskbar button changes
 focus, which fires `on_client_list_changed`, which would `lv_obj_clean()` the row holding
 the button whose `LV_EVENT_CLICKED` dispatch is on the stack. Exactly the hazard
