@@ -31,6 +31,37 @@ project(zephyr_desktop LANGUAGES C)
 set(ZD_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../include)
 set(ZD_ZAPPS   ${CMAKE_CURRENT_SOURCE_DIR}/../zapps)
 
+# --- build identity -----------------------------------------------------------
+#
+# app/VERSION gives APP_VERSION_STRING through <zephyr/app_version.h>; this adds
+# which commit it was cut from, so a release image says "v0.1.0" and everything
+# else says "v0.1.0-3-gabc123def456". The first console line prints both, because
+# "is the board running the image I just built?" is otherwise unanswerable, and
+# milestone J hand-tested a stale binary twice for exactly that reason.
+#
+# Two honest limits, stated rather than papered over:
+#
+#   - this identifies the COMMIT, not the working tree. Uncommitted edits are
+#     invisible here; the version line tells you which release you are near, not
+#     that your last save made it in.
+#   - it is evaluated at CMake configure time. The CMAKE_CONFIGURE_DEPENDS below
+#     re-runs configure when HEAD or the index moves, which covers commit,
+#     checkout and rebase -- the cases where the string would otherwise be a
+#     confident lie.
+include(git)
+git_describe(${CMAKE_CURRENT_SOURCE_DIR} ZD_BUILD_ID)
+if(NOT ZD_BUILD_ID)
+  set(ZD_BUILD_ID "no-git")
+endif()
+zephyr_compile_definitions(ZD_BUILD_ID="${ZD_BUILD_ID}")
+
+foreach(git_file HEAD index)
+  if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/../.git/${git_file})
+    set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+                 ${CMAKE_CURRENT_SOURCE_DIR}/../.git/${git_file})
+  endif()
+endforeach()
+
 # include/zd/ lives outside app/ on purpose: it is the app ABI, shared verbatim
 # with every extension, and it must survive apps moving to an out-of-tree build
 # against the llext EDK.

@@ -4,12 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+#include <zephyr/app_version.h>
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/display.h>
 #include <zephyr/fs/fs.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/sys/util.h>
+
+#include <zd/zapp_abi.h>
 
 #include <lvgl.h>
 #include <lvgl_zephyr.h>
@@ -87,6 +90,15 @@ int main(void)
 {
 	const struct device *display = DEVICE_DT_GET(DT_CHOSEN(zephyr_display));
 	int ret;
+
+	/* First line out, before anything can fail. Which release, which commit,
+	 * and which ABI a zapp on the card will be checked against -- the three
+	 * questions a console is asked when something is wrong, answered before
+	 * there is any chance of not reaching them. See app/CMakeLists.txt for
+	 * what ZD_BUILD_ID does and does not promise.
+	 */
+	LOG_INF("zephyr-desktop v%s (%s), zapp ABI %d.%d", APP_VERSION_STRING, ZD_BUILD_ID,
+		ZD_ABI_MAJOR, ZD_ABI_MINOR);
 
 	if (!device_is_ready(display)) {
 		LOG_ERR("display device %s not ready", display->name);
