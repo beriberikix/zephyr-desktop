@@ -15,6 +15,7 @@
 #include <lvgl_zephyr.h>
 
 #include "chrome/menu.h"
+#include "chrome/rowlist.h"
 #include "chrome/theme.h"
 #include "input/keys.h"
 #include "host/session.h"
@@ -166,6 +167,13 @@ int main(void)
 		 */
 		zd_menu_reap();
 		zd_dialog_reap();
+		/* And the lists last of the surfaces, because zd_dialog_reap()
+		 * builds the file picker and fills its model during that call.
+		 * The other order would leave the picker blank for a frame every
+		 * time it opened -- the same clean-then-build argument that
+		 * already governs the inside of zd_dialog_reap() itself.
+		 */
+		zd_rowlist_reap();
 
 		/* Keys arrive on Zephyr's input thread and everything they
 		 * touch is LVGL's, so they are queued there and delivered

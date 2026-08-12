@@ -23,6 +23,7 @@
 
 #include "selftest.h"
 #include "chrome/menu.h"
+#include "chrome/rowlist.h"
 #include "host/clipboard.h"
 #include "host/fs_api.h"
 #include "host/fs_shim.h"
@@ -423,6 +424,109 @@ static void test_wm(struct zd_wm *wm)
  * desktop-internal window has handle == 0, and text_api.c refuses to dispatch
  * ZD_EV_TEXT_CHANGED for one -- so the fake owner is never dereferenced.
  */
+/*
+ * The row list, checked through its own interface rather than the ABI's.
+ *
+ * The point of nearly every check here is the same one: the model answers
+ * immediately and the pixels lag. That is the contract host/list_api.c and the
+ * file picker both build on, and it is invisible from the outside -- a list
+ * that rebuilt its rows synchronously would pass any test that only looked at
+ * what is on screen, and would then use-after-free the first time a zapp
+ * entered a directory. So these deliberately never reap.
+ */
+static void test_rowlist(struct zd_wm *wm)
+{
+	lv_area_t want = { .x1 = 4, .y1 = 4, .x2 = 4 + 200 - 1, .y2 = 4 + 120 - 1 };
+	uint32_t items_before = zd_rowlist_items_used();
+	uint32_t lists_before = zd_rowlist_live_count();
+	struct zd_client *client;
+	struct zd_rowlist *rl;
+	char buf[ZD_NAME_MAX];
+	int i;
+
+	client = zd_wm_window_create(wm, "selftest list", &want);
+	if (client == NULL) {
+		check(false, "a window for the list checks could be created");
+		return;
+	}
+
+	rl = zd_rowlist_create(client->content, 0, 0, 180, 80);
+	check(rl != NULL, "a row list can be created");
+	if (rl == NULL) {
+		zd_wm_window_close(client);
+		zd_wm_reap(wm);
+		return;
+	}
+
+	check(zd_rowlist_count(rl) == 0, "a new list is empty");
+	check(zd_rowlist_selected(rl) == -1, "and has nothing selected");
+	check(zd_rowlist_capacity() == CONFIG_ZD_LIST_MAX_ITEMS,
+	      "capacity is reported, so nobody has to read the Kconfig");
+
+	check(zd_rowlist_add(rl, "alpha", 10) == 0, "the first row is index 0");
+	check(zd_rowlist_add(rl, "beta", 11) == 1, "and the second is index 1");
+	check(zd_rowlist_add(rl, "gamma", 12) == 2, "and the third is index 2");
+
+	/* The whole design, in one check: three rows exist as far as anyone
+	 * asking is concerned, and zd_rowlist_reap() has not run.
+	 */
+	check(zd_rowlist_count(rl) == 3,
+	      "rows count immediately, before any rebuild has happened");
+	check(zd_rowlist_item_id(rl, 1) == 11, "a row remembers the id it was given");
+	check(zd_rowlist_item_text(rl, 2, buf, sizeof(buf)) == 5 &&
+		      strcmp(buf, "gamma") == 0,
+	      "and its text, read back out of the model rather than off a label");
+	check(zd_rowlist_item_text(rl, 2, buf, 3) == -ENOSPC,
+	      "a short buffer is refused, not filled with half a filename");
+	check(zd_rowlist_item_id(rl, 3) == -ENOENT, "a row past the end says so");
+
+	check(zd_rowlist_select(rl, 1) == 0 && zd_rowlist_selected(rl) == 1,
+	      "the selection round-trips");
+	check(zd_rowlist_select(rl, 3) == -EINVAL, "selecting past the end is refused");
+
+	check(zd_rowlist_key(rl, ZD_KEY_DOWN, 0) && zd_rowlist_selected(rl) == 2,
+	      "Down moves the selection");
+	check(zd_rowlist_key(rl, ZD_KEY_DOWN, 0) && zd_rowlist_selected(rl) == 2,
+	      "and stops at the last row rather than wrapping");
+	check(zd_rowlist_key(rl, ZD_KEY_HOME, 0) && zd_rowlist_selected(rl) == 0,
+	      "Home goes to the top");
+	check(zd_rowlist_key(rl, ZD_KEY_END, 0) && zd_rowlist_selected(rl) == 2,
+	      "End goes to the bottom");
+	check(!zd_rowlist_key(rl, ZD_KEY_CHAR, 0),
+	      "a letter is declined, so the zapp still gets it");
+	check(!zd_rowlist_key(rl, ZD_KEY_ESCAPE, 0), "and so is Escape");
+
+	zd_rowlist_clear(rl);
+	check(zd_rowlist_count(rl) == 0, "clearing empties the list at once");
+	check(zd_rowlist_selected(rl) == -1,
+	      "and clears the selection, because row 1 of the next contents is "
+	      "not what row 1 used to be");
+	check(zd_rowlist_items_used() == items_before,
+	      "and hands every row back to the shared pool");
+
+	/* Fill it past its own cap. The pool is bigger than one list's share on
+	 * purpose, so this proves the per-list bound rather than the pool's.
+	 */
+	for (i = 0; i < CONFIG_ZD_LIST_MAX_ITEMS; i++) {
+		if (zd_rowlist_add(rl, "row", (uint16_t)i) < 0) {
+			break;
+		}
+	}
+	check(i == CONFIG_ZD_LIST_MAX_ITEMS, "a list fills to exactly its capacity");
+	check(zd_rowlist_add(rl, "one too many", 0) == -ENOSPC,
+	      "and then refuses, rather than silently dropping the row");
+
+	check(zd_rowlist_live_count() == lists_before + 1, "one list is live");
+
+	zd_wm_window_close(client);
+	zd_wm_reap(wm);
+
+	check(zd_rowlist_live_count() == lists_before,
+	      "closing the window releases the list");
+	check(zd_rowlist_items_used() == items_before,
+	      "and every row it was still holding");
+}
+
 static void test_text(struct zd_wm *wm)
 {
 	struct zd_zapp_instance *mine = (struct zd_zapp_instance *)0xa1;
@@ -644,6 +748,7 @@ void zd_selftest_run_wm(struct zd_wm *wm)
 	failures = 0;
 
 	test_wm(wm);
+	test_rowlist(wm);
 	test_text(wm);
 	test_menu(wm);
 

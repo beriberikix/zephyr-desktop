@@ -122,6 +122,36 @@ config ZD_MAX_TEXTS
 	  Fixed array, for the reason windows and open files are: a leak should
 	  hit a wall that names itself rather than grow the heap quietly.
 
+config ZD_MAX_LISTS
+	int "Maximum simultaneously live list widgets, desktop-wide"
+	default 4
+	help
+	  Two browsers and a file picker is three; four leaves one spare. Fixed
+	  array, for the same reason windows, text widgets and open files are.
+
+config ZD_LIST_ITEMS_TOTAL
+	int "Rows shared between every live list"
+	default 96
+	help
+	  One pool for the whole desktop rather than an array per list, because
+	  a per-list array is mostly idle memory: four lists that could each
+	  hold ZD_LIST_MAX_ITEMS rows would reserve twenty kilobytes to show a
+	  directory of nine files. Same shape as the open-file table -- one
+	  bounded resource, plus a per-list cap so no one list can take it all.
+
+	  A row costs ZD_NAME_MAX bytes and is not separately configurable: a
+	  row that cannot hold a filename cannot show a directory, so the two
+	  are one constant by construction.
+
+config ZD_LIST_MAX_ITEMS
+	int "Most rows any one list will hold"
+	default 64
+	help
+	  Reported to zapps through list_get_capacity(); adding past it returns
+	  -ENOSPC rather than silently dropping the row, so a zapp can say "this
+	  directory has more in it" instead of quietly lying. A zapp must never
+	  read this symbol directly -- see CLAUDE.md.
+
 config ZD_TEXT_PAGE_LINES
 	int "Lines Page Up and Page Down move the caret"
 	default 8

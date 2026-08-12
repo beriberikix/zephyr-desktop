@@ -24,6 +24,11 @@
 #define ZD_C_TITLE_INACTIVE 0x808080
 #define ZD_C_TITLE_TEXT     0xFFFFFF
 #define ZD_C_TEXT           0x000000
+/* A selected row in a list. The same navy an active titlebar uses, because in
+ * this era they were the same colour -- "highlight" was one system setting.
+ */
+#define ZD_C_SELECT         ZD_C_TITLE_ACTIVE
+#define ZD_C_SELECT_TEXT    0xFFFFFF
 
 /** Thickness of a bevel ring pair, in pixels. */
 #define ZD_BEVEL_W 2
