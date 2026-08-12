@@ -21,6 +21,7 @@
 #include "fs_api.h"
 #include "host_api.h"
 #include "session.h"
+#include "list_api.h"
 #include "text_api.h"
 #include "../chrome/menu.h"
 #include "../loader/zapp_instance.h"
@@ -226,6 +227,49 @@ static int api_label_set_text(zd_zapp_ctx_t ctx, zd_label_t label, const char *t
 
 	lv_label_set_text(obj, text != NULL ? text : "");
 	return 0;
+}
+
+static int api_label_set_pos(zd_zapp_ctx_t ctx, zd_label_t label, int16_t x, int16_t y)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+	lv_obj_t *obj;
+
+	if (inst == NULL) {
+		return -EINVAL;
+	}
+
+	obj = zd_handle_deref((uintptr_t)label, ZD_HANDLE_LABEL, inst);
+	if (obj == NULL) {
+		return -EINVAL;
+	}
+
+	lv_obj_set_pos(obj, x, y);
+	return 0;
+}
+
+/*
+ * Unlike a text widget or a list, a label has no record of its own, so its
+ * handle is freed here rather than from an LV_EVENT_DELETE handler. That is not
+ * an inconsistency to tidy up: a label owns nothing but its lv_obj_t, and the
+ * registry's free_all() at instance teardown already covers the window-close
+ * case that DELETE handlers exist to catch for the others.
+ */
+static void api_label_destroy(zd_zapp_ctx_t ctx, zd_label_t label)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+	lv_obj_t *obj;
+
+	if (inst == NULL) {
+		return;
+	}
+
+	obj = zd_handle_deref((uintptr_t)label, ZD_HANDLE_LABEL, inst);
+	if (obj == NULL) {
+		return;
+	}
+
+	zd_handle_free((uintptr_t)label);
+	lv_obj_delete(obj);
 }
 
 /* --- text ------------------------------------------------------------------- */
@@ -692,6 +736,103 @@ static void *api_unsafe_lvgl_content(zd_zapp_ctx_t ctx, zd_window_t win)
 	return client != NULL ? client->content : NULL;
 }
 
+/* --- lists ------------------------------------------------------------------- */
+
+/*
+ * Thin forwarders, same as the text ones and for the same reason. The handle
+ * check happens inside list_api.c; what happens here is only the ctx -> owner
+ * and win -> client resolution that every entry point needs.
+ */
+
+static zd_list_t api_list_create(zd_zapp_ctx_t ctx, zd_window_t win,
+				 const struct zd_rect *geom, uint32_t flags)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+	struct zd_client *client = window_of(ctx, win);
+
+	if (inst == NULL || client == NULL || geom == NULL) {
+		return NULL;
+	}
+
+	return (zd_list_t)zd_list_create(inst, client, geom, flags);
+}
+
+static void api_list_destroy(zd_zapp_ctx_t ctx, zd_list_t list)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	if (inst != NULL) {
+		zd_list_destroy(inst, (uintptr_t)list);
+	}
+}
+
+static int api_list_set_geometry(zd_zapp_ctx_t ctx, zd_list_t list,
+				 const struct zd_rect *geom)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_list_set_geometry(inst, (uintptr_t)list, geom) : -EINVAL;
+}
+
+static int api_list_clear(zd_zapp_ctx_t ctx, zd_list_t list)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_list_clear(inst, (uintptr_t)list) : -EINVAL;
+}
+
+static int api_list_add_item(zd_zapp_ctx_t ctx, zd_list_t list, const char *text,
+			     uint16_t id)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_list_add_item(inst, (uintptr_t)list, text, id) : -EINVAL;
+}
+
+static int api_list_get_count(zd_zapp_ctx_t ctx, zd_list_t list)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_list_get_count(inst, (uintptr_t)list) : -EINVAL;
+}
+
+static int api_list_get_capacity(zd_zapp_ctx_t ctx, zd_list_t list)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_list_get_capacity(inst, (uintptr_t)list) : -EINVAL;
+}
+
+static int api_list_get_selected(zd_zapp_ctx_t ctx, zd_list_t list)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_list_get_selected(inst, (uintptr_t)list) : -EINVAL;
+}
+
+static int api_list_set_selected(zd_zapp_ctx_t ctx, zd_list_t list, int32_t index)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_list_set_selected(inst, (uintptr_t)list, index) : -EINVAL;
+}
+
+static int api_list_get_item_id(zd_zapp_ctx_t ctx, zd_list_t list, int32_t index)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_list_get_item_id(inst, (uintptr_t)list, index) : -EINVAL;
+}
+
+static int api_list_get_item_text(zd_zapp_ctx_t ctx, zd_list_t list, int32_t index,
+				  char *buf, uint32_t len)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_list_get_item_text(inst, (uintptr_t)list, index, buf, len)
+			    : -EINVAL;
+}
+
 /* --- the tables ------------------------------------------------------------- */
 
 #define ZD_HOST_API_COMMON                                                                 \
@@ -726,7 +867,16 @@ static void *api_unsafe_lvgl_content(zd_zapp_ctx_t ctx, zd_window_t win)
 	.window_get_content_size = api_window_get_content_size,                             \
 	.dialog_confirm = api_dialog_confirm, .dialog_file = api_dialog_file,               \
 	.dialog_get_path = api_dialog_get_path, .clock_now = api_clock_now,                \
-	.window_close_cancel = api_window_close_cancel
+	.window_close_cancel = api_window_close_cancel,                                     \
+	.list_create = api_list_create, .list_destroy = api_list_destroy,                   \
+	.list_set_geometry = api_list_set_geometry, .list_clear = api_list_clear,           \
+	.list_add_item = api_list_add_item, .list_get_count = api_list_get_count,           \
+	.list_get_capacity = api_list_get_capacity,                                         \
+	.list_get_selected = api_list_get_selected,                                         \
+	.list_set_selected = api_list_set_selected,                                         \
+	.list_get_item_id = api_list_get_item_id,                                           \
+	.list_get_item_text = api_list_get_item_text,                                       \
+	.label_set_pos = api_label_set_pos, .label_destroy = api_label_destroy
 
 static const struct zd_host_api host_api_untrusted = {
 	ZD_HOST_API_COMMON,

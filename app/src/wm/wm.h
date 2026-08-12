@@ -114,6 +114,16 @@ struct zd_client {
 	 */
 	lv_obj_t *text_focus;
 
+	/**
+	 * The list with the keyboard in this window, or NULL.
+	 *
+	 * The second customer of the arrangement above, and the reason that
+	 * comment was written the way it was: the WM does not know what a row
+	 * list is either. host/list_api.c sets this; the two fields clear each
+	 * other, so one window has one place keys go.
+	 */
+	lv_obj_t *list_focus;
+
 	/* WM-authoritative geometry. LVGL follows this, never the reverse. */
 	lv_area_t geom;
 	char title[ZD_TITLE_MAX];
@@ -209,6 +219,19 @@ struct zd_wm {
 	 * Never called with CTRL held: an accelerator must beat the caret.
 	 */
 	bool (*on_client_text_key)(struct zd_client *client, uint32_t code, uint32_t unicode,
+				   uint16_t mods);
+
+	/* Offered a key press after on_client_text_key declined it, so a
+	 * focused list can take the arrow keys and Enter.
+	 *
+	 * A second hook rather than a smarter first one. Merging them would
+	 * mean host/text_api.c and host/list_api.c importing each other to
+	 * agree about which of them should answer, when the answer is already
+	 * expressed by the order the WM tries them in: the caret wins, because
+	 * a window where Up moved a list selection while the user was typing
+	 * would be wrong.
+	 */
+	bool (*on_client_list_key)(struct zd_client *client, uint32_t code, uint32_t unicode,
 				   uint16_t mods);
 
 	/* Called when the user asks to close a window, so the owner can ask the

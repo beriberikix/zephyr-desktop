@@ -92,6 +92,8 @@ typedef struct zd_label *zd_label_t;
 typedef struct zd_text *zd_text_t;
 /** A menu bar, or one drop-down within it. Added in 0.5. */
 typedef struct zd_menu *zd_menu_t;
+/** A scrolling column of selectable single-line rows. Added in 0.6. */
+typedef struct zd_list *zd_list_t;
 /** An open file. */
 typedef struct zd_file *zd_file_t;
 /**
@@ -335,6 +337,42 @@ enum zd_event_type {
 	 * from here is safe.
 	 */
 	ZD_EV_DIALOG,
+
+	/* --- ABI 0.6 ------------------------------------------------------ */
+
+	/**
+	 * A list's selection moved -- by click, or by an arrow key while that
+	 * list had the keyboard within its window. ev->list names the list, the
+	 * row and the id you gave that row; index is -1 when the selection was
+	 * cleared.
+	 *
+	 * CHEAP BY CONTRACT. This fires on every arrow key, so do not do
+	 * filesystem I/O in it. Whatever you want to show about the selected
+	 * thing, you had while you were filling the list -- fs_readdir handed
+	 * you the size and the type -- so cache it then. On a board where
+	 * storage borrows the display's pin, a stat per keystroke would stop
+	 * the screen drawing while the user held Down. Same reasoning as
+	 * ZD_EV_RESIZED arriving on release rather than per pointer sample.
+	 */
+	ZD_EV_LIST_SELECT,
+	/**
+	 * A row was double-clicked, or Enter was pressed on it.
+	 *
+	 * Delivered after the click has been fully dispatched, so rebuilding
+	 * the list from in here -- which is exactly what entering a directory
+	 * means -- is safe. list_clear() and list_add_item() write a model that
+	 * the desktop turns back into rows one loop iteration later.
+	 */
+	ZD_EV_LIST_ACTIVATE,
+	/**
+	 * Somebody launched you again while you were already running, and you
+	 * set ZD_ZAPP_FLAG_SINGLETON so no second instance was made.
+	 *
+	 * Call get_launch_arg() for what they wanted; ev->win is one of your
+	 * windows, already raised and focused. A path does not fit in an event,
+	 * for the same reason dialog_get_path() exists.
+	 */
+	ZD_EV_LAUNCH_ARG,
 };
 
 struct zd_event {
@@ -376,6 +414,12 @@ struct zd_event {
 			uint16_t id;
 			int16_t result;
 		} dialog;
+		/** ZD_EV_LIST_SELECT and ZD_EV_LIST_ACTIVATE. Added in 0.6. */
+		struct {
+			zd_list_t list;
+			int16_t index; /**< row, or -1 for "nothing selected" */
+			uint16_t id;   /**< the id you gave that row */
+		} list;
 	};
 };
 
@@ -398,6 +442,12 @@ _Static_assert(offsetof(struct zd_event, click) == offsetof(struct zd_event, key
 		       offsetof(struct zd_event, click) ==
 			       offsetof(struct zd_event, resize),
 	       "a zd_event union member is not at the union's offset");
+/* The 0.6 member holds a pointer, so it is the first one whose alignment could
+ * have moved the union. It does not: `win` is already a pointer, so the union
+ * was pointer-aligned before this arrived. Asserted rather than reasoned about.
+ */
+_Static_assert(offsetof(struct zd_event, click) == offsetof(struct zd_event, list),
+	       "the zd_event union moved when the list member was added");
 
 struct zd_window_desc {
 	const char *title;
@@ -744,6 +794,94 @@ struct zd_host_api {
 	 * from you.
 	 */
 	void (*window_close_cancel)(zd_zapp_ctx_t ctx, zd_window_t win);
+
+	/* --- ABI 0.6: list widgets ------------------------------------------ */
+
+	/*
+	 * A scrolling column of single-line rows, one of which may be selected.
+	 *
+	 * label_create() shows a string and text_create() edits one; this is
+	 * for choosing between many, and it is what makes a file browser
+	 * possible without the zapp drawing rows it cannot draw -- a zapp never
+	 * sees an lv_obj_t, so before this there was no way to put a directory
+	 * on screen at all.
+	 *
+	 * THE LIST IS A MODEL, NOT A PICTURE, and this is the one thing to
+	 * understand before using it. list_clear() and list_add_item() change
+	 * what the list *is*, immediately: list_get_count() and
+	 * list_get_selected() answer from the model the instant you call them,
+	 * and list_get_item_text() reads back what you put in. Only the rows on
+	 * screen lag, by at most one turn of the desktop loop.
+	 *
+	 * That is what makes it safe to empty and refill a list from inside
+	 * ZD_EV_LIST_ACTIVATE -- which is precisely what "the user opened this
+	 * directory" means. It is also the rule the window manager already
+	 * applies to stacking order: the model is the truth and what LVGL holds
+	 * is a projection of it, re-applied from the loop.
+	 *
+	 * Row ids are yours; the desktop only hands them back. A list belongs
+	 * to the window it was created in and dies with it.
+	 */
+	zd_list_t (*list_create)(zd_zapp_ctx_t ctx, zd_window_t win,
+				 const struct zd_rect *geom, uint32_t flags);
+	void (*list_destroy)(zd_zapp_ctx_t ctx, zd_list_t list);
+	int (*list_set_geometry)(zd_zapp_ctx_t ctx, zd_list_t list,
+				 const struct zd_rect *geom);
+
+	/**
+	 * Empty it.
+	 *
+	 * The selection is cleared, not preserved. Row 3 of the new contents is
+	 * not the thing row 3 used to be, and carrying the index across is how
+	 * you delete the wrong file.
+	 */
+	int (*list_clear)(zd_zapp_ctx_t ctx, zd_list_t list);
+	/** @return the new row's index, or -ENOSPC if the list is full. */
+	int (*list_add_item)(zd_zapp_ctx_t ctx, zd_list_t list, const char *text,
+			     uint16_t id);
+	int (*list_get_count)(zd_zapp_ctx_t ctx, zd_list_t list);
+	/**
+	 * @return the most rows this list will hold.
+	 *
+	 * Ask, do not assume -- the bound is the desktop's and differs between
+	 * boards, exactly as it does for text_get_capacity(). A zapp that
+	 * guessed would either refuse to show a directory it could have shown
+	 * or quietly stop listing partway down it.
+	 */
+	int (*list_get_capacity)(zd_zapp_ctx_t ctx, zd_list_t list);
+	/** @return the selected row, or -1 if nothing is selected. */
+	int (*list_get_selected)(zd_zapp_ctx_t ctx, zd_list_t list);
+	/** Select a row and scroll it into view. -1 clears the selection. */
+	int (*list_set_selected)(zd_zapp_ctx_t ctx, zd_list_t list, int32_t index);
+	/** @return the id you gave row @p index, or a negative errno. */
+	int (*list_get_item_id)(zd_zapp_ctx_t ctx, zd_list_t list, int32_t index);
+	/**
+	 * Copy a row's text back out.
+	 *
+	 * NOT short by contract, unlike text_get_text() and fs_read(): a row is
+	 * one line, and half a filename still names a file, just the wrong one.
+	 * Returns -ENOSPC rather than truncating, like dialog_get_path().
+	 *
+	 * Ask rather than keeping your own copy of every row. The desktop is
+	 * already holding the string; a second listing alongside it is memory
+	 * spent to avoid a memcpy.
+	 *
+	 * @return the length written excluding the terminator, or -errno.
+	 */
+	int (*list_get_item_text)(zd_zapp_ctx_t ctx, zd_list_t list, int32_t index,
+				  char *buf, uint32_t len);
+
+	/* --- ABI 0.6: labels can be moved and destroyed --------------------- */
+
+	/*
+	 * 0.5 could create a label and then neither move it nor get rid of it,
+	 * and every one it created held a handle for the life of the window.
+	 * That survived only because nothing had a label whose position
+	 * depended on anything -- a status line along the bottom of a resizable
+	 * window is the first, and it has to follow ZD_EV_RESIZED.
+	 */
+	int (*label_set_pos)(zd_zapp_ctx_t ctx, zd_label_t label, int16_t x, int16_t y);
+	void (*label_destroy)(zd_zapp_ctx_t ctx, zd_label_t label);
 };
 
 /* --- the zapp's side ------------------------------------------------------- */

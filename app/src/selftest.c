@@ -26,6 +26,7 @@
 #include "chrome/rowlist.h"
 #include "host/clipboard.h"
 #include "host/fs_api.h"
+#include "host/list_api.h"
 #include "host/fs_shim.h"
 #include "host/storage.h"
 #include "host/text_api.h"
@@ -527,6 +528,108 @@ static void test_rowlist(struct zd_wm *wm)
 	      "and every row it was still holding");
 }
 
+/*
+ * The list as a zapp sees it: handles, ownership, and the key routing.
+ *
+ * test_rowlist() already covered the model; what is new here is everything the
+ * ABI layer adds, and the part worth having is the ownership check. A zapp
+ * holding another zapp's list handle is the failure the registry exists to turn
+ * into -EINVAL, and it is invisible until someone tries it.
+ */
+static void test_list(struct zd_wm *wm)
+{
+	struct zd_zapp_instance *mine = (struct zd_zapp_instance *)0xb1;
+	struct zd_zapp_instance *yours = (struct zd_zapp_instance *)0xb2;
+	lv_area_t want = { .x1 = 4, .y1 = 4, .x2 = 4 + 200 - 1, .y2 = 4 + 120 - 1 };
+	struct zd_rect geom = { .x = 0, .y = 0, .w = 180, .h = 80 };
+	uint32_t before = zd_handle_live_count();
+	struct zd_client *client;
+	uintptr_t list;
+	uintptr_t stale;
+	char buf[ZD_NAME_MAX];
+
+	client = zd_wm_window_create(wm, "selftest list api", &want);
+	if (client == NULL) {
+		check(false, "a window for the list API checks could be created");
+		return;
+	}
+
+	list = zd_list_create(mine, client, &geom, 0);
+	check(list != 0, "a list can be created through the ABI layer");
+	check(client->list_focus == NULL,
+	      "a new list does not take the keyboard, unlike a text widget");
+
+	check(zd_list_add_item(mine, list, "one", 100) == 0, "a row can be added");
+	check(zd_list_add_item(mine, list, "two", 200) == 1, "and another");
+	check(zd_list_get_count(mine, list) == 2,
+	      "the count answers from the model, with no rebuild in between");
+	check(zd_list_get_capacity(mine, list) == CONFIG_ZD_LIST_MAX_ITEMS,
+	      "capacity is asked for rather than assumed");
+
+	check(zd_list_get_item_id(mine, list, 1) == 200, "a row's id comes back");
+	check(zd_list_get_item_text(mine, list, 0, buf, sizeof(buf)) == 3 &&
+		      strcmp(buf, "one") == 0,
+	      "and its text");
+	check(zd_list_get_item_text(mine, list, 0, buf, 2) == -ENOSPC,
+	      "which is refused rather than truncated into a short buffer");
+
+	/* Ownership, the thing the registry is for. */
+	check(zd_list_get_count(yours, list) == -EINVAL,
+	      "another instance's list handle does not resolve");
+	check(zd_list_add_item(yours, list, "sneaky", 0) == -EINVAL,
+	      "and cannot be written to either");
+
+	check(zd_list_set_selected(mine, list, 1) == 0 &&
+		      zd_list_get_selected(mine, list) == 1,
+	      "the selection round-trips through the ABI layer");
+	check(zd_list_clear(mine, list) == 0 && zd_list_get_count(mine, list) == 0 &&
+		      zd_list_get_selected(mine, list) == -1,
+	      "clearing empties and deselects at once, before any reap");
+
+	/* Key routing. The list only gets keys once something has focused it,
+	 * which in practice is a click; do it by hand here.
+	 */
+	zd_list_add_item(mine, list, "a", 1);
+	zd_list_add_item(mine, list, "b", 2);
+	zd_wm_focus(wm, client);
+
+	check(!zd_list_on_client_key(client, ZD_KEY_DOWN, 0, 0),
+	      "a list with no keyboard focus declines the arrow keys");
+
+	zd_list_focus(client, lv_obj_get_child(client->content, 0));
+	check(client->list_focus != NULL, "a list can be given the keyboard");
+	check(client->text_focus == NULL,
+	      "and taking it clears the caret, so one window has one destination");
+
+	zd_wm_key(wm, ZD_KEY_DOWN, 0, 0);
+	check(zd_list_get_selected(mine, list) == 0,
+	      "Down through the WM's routing reaches the focused list");
+	zd_wm_key(wm, ZD_KEY_DOWN, 0, 0);
+	check(zd_list_get_selected(mine, list) == 1, "and moves it again");
+
+	/* CTRL must never reach a widget, for the same reason it must never
+	 * reach the caret: Ctrl+D is an accelerator, not a cursor movement.
+	 */
+	zd_wm_key(wm, ZD_KEY_DOWN, 0, ZD_MOD_CTRL);
+	check(zd_list_get_selected(mine, list) == 1,
+	      "a key held with CTRL does not reach the list");
+
+	check(!zd_list_on_client_key(client, ZD_KEY_CHAR, 'q', 0),
+	      "a letter is declined, so a zapp can still use it");
+
+	stale = list;
+	zd_list_destroy(mine, list);
+	check(zd_list_get_count(mine, stale) == -EINVAL,
+	      "a destroyed list's handle stops resolving");
+
+	zd_wm_window_close(client);
+	zd_wm_reap(wm);
+
+	check(zd_list_live_count() == 0, "no list widget outlives its window");
+	check(zd_handle_live_count() == before, "and no handle does either");
+	check(zd_rowlist_items_used() == 0, "and every row is back in the pool");
+}
+
 static void test_text(struct zd_wm *wm)
 {
 	struct zd_zapp_instance *mine = (struct zd_zapp_instance *)0xa1;
@@ -749,6 +852,7 @@ void zd_selftest_run_wm(struct zd_wm *wm)
 
 	test_wm(wm);
 	test_rowlist(wm);
+	test_list(wm);
 	test_text(wm);
 	test_menu(wm);
 

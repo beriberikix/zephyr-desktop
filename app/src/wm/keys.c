@@ -53,6 +53,16 @@ void zd_wm_key(struct zd_wm *wm, uint32_t code, uint32_t unicode, uint16_t mods)
 		return; /* a text widget consumed it */
 	}
 
+	/* Then a list, if one has the keyboard. Second rather than first: the
+	 * two cannot both be focused, so the order only decides what happens if
+	 * a future widget kind forgets to clear the others -- and "the caret
+	 * wins" is the right answer to that.
+	 */
+	if ((mods & ZD_MOD_CTRL) == 0 && wm->on_client_list_key != NULL &&
+	    wm->on_client_list_key(client, code, unicode, mods)) {
+		return;
+	}
+
 	if (wm->on_client_key != NULL) {
 		wm->on_client_key(client, code, unicode, mods);
 	}

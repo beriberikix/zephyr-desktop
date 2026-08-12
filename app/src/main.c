@@ -20,6 +20,7 @@
 #include "input/keys.h"
 #include "host/session.h"
 #include "host/storage.h"
+#include "host/list_api.h"
 #include "host/text_api.h"
 #include "loader/zapp_instance.h"
 #include "loader/zapp_loader.h"
@@ -119,6 +120,7 @@ int main(void)
 	wm.on_client_minimized = zd_zapp_on_client_minimized;
 	wm.on_client_key = zd_zapp_on_client_key;
 	wm.on_client_text_key = zd_text_on_client_key;
+	wm.on_client_list_key = zd_list_on_client_key;
 	wm.on_client_close_request = zd_zapp_on_client_close_request;
 	wm.on_client_close_stalled = zd_zapp_on_client_close_stalled;
 	zd_keys_init(&wm);
