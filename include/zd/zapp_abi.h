@@ -491,6 +491,39 @@ struct zd_host_api {
 	int (*text_select)(zd_zapp_ctx_t ctx, zd_text_t text, uint32_t from, uint32_t to);
 	/** @return 1 if something was deleted, 0 if nothing was selected. */
 	int (*text_delete_selection)(zd_zapp_ctx_t ctx, zd_text_t text);
+
+	/* --- ABI 0.5: the clipboard ---------------------------------------- */
+
+	/*
+	 * One desktop-wide buffer of bytes, outliving the zapp that filled it.
+	 * This is the first thing in the ABI that is a property of the desktop
+	 * rather than of your instance, which is exactly what makes pasting
+	 * into another application work.
+	 *
+	 * No ownership negotiation and no formats. X11's selection protocol is
+	 * what taking those seriously looks like, and none of it earns its keep
+	 * here.
+	 */
+	/** Truncates at the desktop's limit. @return bytes stored. */
+	int (*clipboard_set)(zd_zapp_ctx_t ctx, const char *text, uint32_t len);
+	/** Short by contract, from byte offset @p from. @return bytes copied. */
+	int (*clipboard_get)(zd_zapp_ctx_t ctx, uint32_t from, char *buf, uint32_t len);
+	int (*clipboard_length)(zd_zapp_ctx_t ctx);
+
+	/**
+	 * The three verbs against a text widget.
+	 *
+	 * Provided rather than left to each zapp because the empty case of each
+	 * is where a reimplementation goes wrong, and because two applications
+	 * ought to agree about what Ctrl+V does.
+	 *
+	 * @return bytes moved, 0 for a no-op -- nothing selected, or an empty
+	 *         clipboard -- or a negative errno. A cut copies first and only
+	 *         deletes if the copy succeeded.
+	 */
+	int (*text_cut)(zd_zapp_ctx_t ctx, zd_text_t text);
+	int (*text_copy)(zd_zapp_ctx_t ctx, zd_text_t text);
+	int (*text_paste)(zd_zapp_ctx_t ctx, zd_text_t text);
 };
 
 /* --- the zapp's side ------------------------------------------------------- */

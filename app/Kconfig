@@ -56,6 +56,19 @@ config ZD_TEXT_MAX
 	  the zapp is told when a file will not fit, rather than the document
 	  being silently truncated.
 
+config ZD_CLIPBOARD_MAX
+	int "Largest thing the clipboard will hold (bytes)"
+	default 2048
+	help
+	  Static, not heap: the clipboard outlives every zapp by design, so a
+	  heap allocation here would be one the desktop never frees and could
+	  fail at the worst possible moment -- the instant after Ctrl+C, where
+	  the user has no reason to imagine it could not work. A fixed buffer
+	  always has room for something.
+
+	  A copy larger than this is truncated and logged, not refused. Half a
+	  paste is recoverable; a copy that silently produced nothing is not.
+
 config ZD_MAX_TEXTS
 	int "Maximum simultaneously live text widgets, desktop-wide"
 	default 8

@@ -29,6 +29,7 @@
 #include <zephyr/logging/log.h>
 
 #include "text_api.h"
+#include "clipboard.h"
 #include "../chrome/theme.h"
 #include "../input/keys.h"
 #include "../loader/zapp_instance.h"
@@ -508,6 +509,94 @@ int zd_text_delete_selection(struct zd_zapp_instance *owner, uintptr_t handle)
 uint32_t zd_text_live_count(void)
 {
 	return live_texts;
+}
+
+/* --- cut, copy, paste ---------------------------------------------------------- */
+
+/*
+ * The three verbs live here rather than in each zapp, and that is not a
+ * convenience either. "Copy" is one line; "cut" is delete-then-store in the
+ * right order, and "paste" is replace-the-selection-then-insert -- and the
+ * empty-selection case of each is exactly where a reimplementation goes wrong.
+ * Getting one desktop-wide answer means two zapps agree about what Ctrl+V does.
+ */
+
+int zd_text_copy(struct zd_zapp_instance *owner, uintptr_t handle)
+{
+	struct text_rec *rec = rec_of(owner, handle);
+	uint32_t from_char;
+	uint32_t to_char;
+	const char *s;
+	uint32_t from;
+	uint32_t to;
+
+	if (rec == NULL) {
+		return -EINVAL;
+	}
+
+	if (!selection_chars(rec, &from_char, &to_char)) {
+		return 0; /* nothing selected is not a failure, it is a no-op */
+	}
+
+	s = text_of(rec);
+	from = byte_of(s, from_char);
+	to = byte_of(s, to_char);
+
+	return zd_clipboard_set(s + from, to - from);
+}
+
+int zd_text_cut(struct zd_zapp_instance *owner, uintptr_t handle)
+{
+	struct text_rec *rec = rec_of(owner, handle);
+	int copied;
+
+	if (rec == NULL) {
+		return -EINVAL;
+	}
+
+	/* Copy before deleting, and only delete if the copy worked: a cut that
+	 * removed the text and then failed to store it has destroyed it.
+	 */
+	copied = zd_text_copy(owner, handle);
+	if (copied <= 0) {
+		return copied;
+	}
+
+	rec->suppress++;
+	drop_selection(rec);
+	rec->suppress--;
+
+	return copied;
+}
+
+int zd_text_paste(struct zd_zapp_instance *owner, uintptr_t handle)
+{
+	struct text_rec *rec = rec_of(owner, handle);
+	uint32_t got = 0;
+	int chunk;
+
+	if (rec == NULL) {
+		return -EINVAL;
+	}
+
+	if (zd_clipboard_length() == 0) {
+		return 0;
+	}
+
+	rec->suppress++;
+	drop_selection(rec);
+
+	/* The clipboard read is short by contract, so loop -- the desktop obeys
+	 * its own rules rather than reaching past them because it can.
+	 */
+	while ((chunk = zd_clipboard_get(got, edit_buf, sizeof(edit_buf))) > 0) {
+		lv_textarea_add_text(rec->obj, edit_buf);
+		got += (uint32_t)chunk;
+	}
+
+	rec->suppress--;
+
+	return chunk < 0 ? chunk : (int)got;
 }
 
 /* --- keys --------------------------------------------------------------------- */

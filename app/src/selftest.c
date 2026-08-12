@@ -22,6 +22,7 @@
 #include <zd/zapp_abi.h>
 
 #include "selftest.h"
+#include "host/clipboard.h"
 #include "host/fs_api.h"
 #include "host/fs_shim.h"
 #include "host/storage.h"
@@ -476,6 +477,37 @@ static void test_text(struct zd_wm *wm)
 		zd_wm_key(wm, ZD_KEY_CHAR, 's', ZD_MOD_CTRL);
 		check(zd_text_get_length(mine, text) == len,
 		      "a key held with CTRL does not reach the text widget");
+	}
+
+	/* --- the clipboard, which only means anything against a widget --- */
+
+	check(zd_text_set_text(mine, text, "alpha beta") == 0, "set_text for the copy");
+	check(zd_text_copy(mine, text) == 0, "copying nothing is a no-op, not an error");
+
+	zd_text_select(mine, text, 0, 5);
+	check(zd_text_copy(mine, text) == 5 && zd_clipboard_length() == 5,
+	      "copy stores exactly the selection");
+	check(zd_clipboard_get(0, buf, sizeof(buf)) == 5 && strcmp(buf, "alpha") == 0,
+	      "and the clipboard hands it back");
+
+	zd_text_select(mine, text, 6, 10);
+	check(zd_text_cut(mine, text) == 4 && zd_text_get_length(mine, text) == 6,
+	      "cut removes what it copied");
+	check(zd_clipboard_length() == 4, "and the clipboard now holds it");
+
+	zd_text_set_cursor(mine, text, 6);
+	check(zd_text_paste(mine, text) == 4 && zd_text_get_length(mine, text) == 10,
+	      "paste puts it back");
+
+	check(zd_clipboard_set("x", 1) == 1 && zd_clipboard_get(0, buf, 1) == 0,
+	      "clipboard_get into a one-byte buffer returns 0, not an overflow");
+
+	{
+		static char big[CONFIG_ZD_CLIPBOARD_MAX + 64];
+
+		memset(big, 'z', sizeof(big));
+		check(zd_clipboard_set(big, sizeof(big)) == CONFIG_ZD_CLIPBOARD_MAX,
+		      "an oversized copy truncates rather than failing");
 	}
 
 	check(zd_text_live_count() == 1, "one text widget is live");

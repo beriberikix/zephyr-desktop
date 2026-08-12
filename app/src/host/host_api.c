@@ -16,6 +16,7 @@
 #include <zephyr/llext/symbol.h>
 #include <zephyr/logging/log.h>
 
+#include "clipboard.h"
 #include "fs_api.h"
 #include "host_api.h"
 #include "session.h"
@@ -321,6 +322,50 @@ static int api_text_delete_selection(zd_zapp_ctx_t ctx, zd_text_t text)
 	return inst != NULL ? zd_text_delete_selection(inst, (uintptr_t)text) : -EINVAL;
 }
 
+/* --- clipboard --------------------------------------------------------------- */
+
+static int api_clipboard_set(zd_zapp_ctx_t ctx, const char *text, uint32_t len)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_clipboard_set(text, len) : -EINVAL;
+}
+
+static int api_clipboard_get(zd_zapp_ctx_t ctx, uint32_t from, char *buf, uint32_t len)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_clipboard_get(from, buf, len) : -EINVAL;
+}
+
+static int api_clipboard_length(zd_zapp_ctx_t ctx)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? (int)zd_clipboard_length() : -EINVAL;
+}
+
+static int api_text_cut(zd_zapp_ctx_t ctx, zd_text_t text)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_text_cut(inst, (uintptr_t)text) : -EINVAL;
+}
+
+static int api_text_copy(zd_zapp_ctx_t ctx, zd_text_t text)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_text_copy(inst, (uintptr_t)text) : -EINVAL;
+}
+
+static int api_text_paste(zd_zapp_ctx_t ctx, zd_text_t text)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_text_paste(inst, (uintptr_t)text) : -EINVAL;
+}
+
 /* --- filesystem and misc ---------------------------------------------------- */
 
 static int api_path_resolve(zd_zapp_ctx_t ctx, enum zd_dir dir, char *out, uint32_t out_len)
@@ -530,7 +575,10 @@ static void *api_unsafe_lvgl_content(zd_zapp_ctx_t ctx, zd_window_t win)
 	.text_insert = api_text_insert, .text_set_geometry = api_text_set_geometry,         \
 	.text_set_cursor = api_text_set_cursor, .text_get_cursor = api_text_get_cursor,     \
 	.text_get_selection = api_text_get_selection, .text_select = api_text_select,       \
-	.text_delete_selection = api_text_delete_selection
+	.text_delete_selection = api_text_delete_selection,                                 \
+	.clipboard_set = api_clipboard_set, .clipboard_get = api_clipboard_get,             \
+	.clipboard_length = api_clipboard_length, .text_cut = api_text_cut,                 \
+	.text_copy = api_text_copy, .text_paste = api_text_paste
 
 static const struct zd_host_api host_api_untrusted = {
 	ZD_HOST_API_COMMON,

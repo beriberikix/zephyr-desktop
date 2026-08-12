@@ -50,6 +50,7 @@ target_sources(app PRIVATE
   src/host/fs_api.c
   src/host/host_api.c
   src/host/text_api.c
+  src/host/clipboard.c
   src/loader/zapp_loader.c
   src/loader/zapp_instance.c
   src/input/keys.c

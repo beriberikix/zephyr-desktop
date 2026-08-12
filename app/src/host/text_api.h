@@ -69,6 +69,20 @@ int zd_text_select(struct zd_zapp_instance *owner, uintptr_t handle, uint32_t fr
 int zd_text_delete_selection(struct zd_zapp_instance *owner, uintptr_t handle);
 
 /**
+ * @brief The three clipboard verbs, against a text widget.
+ *
+ * Here rather than in each zapp because the empty-selection case of each is
+ * where a reimplementation goes wrong, and because two zapps should agree about
+ * what Ctrl+V does.
+ *
+ * @return bytes moved, 0 for a no-op (nothing selected, empty clipboard), or a
+ *         negative errno.
+ */
+int zd_text_copy(struct zd_zapp_instance *owner, uintptr_t handle);
+int zd_text_cut(struct zd_zapp_instance *owner, uintptr_t handle);
+int zd_text_paste(struct zd_zapp_instance *owner, uintptr_t handle);
+
+/**
  * @brief Offer a key to the focused client's text widget.
  *
  * Installed as wm->on_client_text_key. Returns true when the widget consumed
