@@ -34,6 +34,7 @@
 
 #include "dialog.h"
 #include "osk.h"
+#include "../chrome/rowlist.h"
 #include "../chrome/theme.h"
 #include "../chrome/titlebar.h"
 #include "../host/bus_arb.h"
@@ -48,9 +49,9 @@ LOG_MODULE_DECLARE(zd_main, CONFIG_ZD_LOG_LEVEL);
 #define BTN_H    (18 + CONFIG_ZD_TOUCH_SLOP_PX)
 #define BTN_W    66
 #define BTN_GAP  6
-#define ROW_H    (16 + CONFIG_ZD_TOUCH_SLOP_PX)
 #define PAD      6
 #define FIELD_H  (18 + CONFIG_ZD_TOUCH_SLOP_PX)
+#define WHERE_H  14
 
 /* Buttons sit in a row, so they are made wide rather than given hit area they
  * do not occupy -- BTN_W is already generous for a thumb. Same rule as
@@ -68,14 +69,25 @@ static struct {
 	char title[32];
 	char msg[128];
 	uint32_t arg; /**< buttons for a confirm, mode for a file dialog */
-	enum zd_dir dir;
 } want;
+
+/*
+ * Row ids in the picker's list.
+ *
+ * The id is documented as the caller's -- the desktop only hands it back -- and
+ * here the caller is us, so it carries the one bit the click handler needs.
+ * The alternative was a parallel array of types indexed by row, which is the
+ * same information kept somewhere it can fall out of step.
+ */
+#define ROW_IS_DIR 0x8000u
+#define ROW_UP     0x7FFFu /**< the ".." row; never a real entry's index */
 
 static struct {
 	lv_obj_t *shade;
 	lv_obj_t *panel;
-	lv_obj_t *list;  /**< file dialog only */
-	lv_obj_t *field; /**< file dialog, save mode only */
+	struct zd_rowlist *rl; /**< file dialog only */
+	lv_obj_t *where;       /**< file dialog only: which directory this is */
+	lv_obj_t *field;       /**< file dialog, save mode only */
 
 	struct zd_zapp_instance *owner;
 	struct zd_client *client;
@@ -86,11 +98,15 @@ static struct {
 	bool open;
 	bool dismissed;
 	bool is_file;
-	char dir[ZD_PATH_MAX];
+	bool relist; /**< the directory changed; refill from the loop */
+	char root[ZD_PATH_MAX]; /**< the directory the caller named; the floor */
+	char dir[ZD_PATH_MAX];  /**< where we are now, at or below root */
 	char path[ZD_PATH_MAX]; /**< the answer, valid after ZD_EV_DIALOG */
 } dlg;
 
 static bool set_path(const char *name);
+static void fill_model(void);
+static void show_where(void);
 
 /* --- answering ----------------------------------------------------------------- */
 
@@ -136,8 +152,10 @@ void zd_dialog_reap(void)
 {
 	if (dlg.dismissed) {
 		dlg.dismissed = false;
-		dlg.list = NULL;
+		dlg.rl = NULL;
+		dlg.where = NULL;
 		dlg.field = NULL;
+		dlg.relist = false;
 		lv_obj_clean(dlg.panel);
 	}
 
@@ -153,6 +171,18 @@ void zd_dialog_reap(void)
 		} else {
 			build_confirm();
 		}
+	}
+
+	/* And a directory the user entered, which is the third deferral in this
+	 * file and the same shape as the other two: the click that asked for it
+	 * was dispatched from a row this refill replaces. Only the model is
+	 * touched here; chrome/rowlist.c's own reap, which runs after this one,
+	 * turns it back into widgets.
+	 */
+	if (dlg.relist) {
+		dlg.relist = false;
+		fill_model();
+		show_where();
 	}
 }
 
@@ -263,8 +293,10 @@ static int32_t open_panel(const char *title, int32_t w, int32_t h)
 
 	lv_obj_clean(dlg.panel);
 	dlg.dismissed = false;
-	dlg.list = NULL;
+	dlg.rl = NULL;
+	dlg.where = NULL;
 	dlg.field = NULL;
+	dlg.relist = false;
 
 	lv_obj_set_size(dlg.panel, w, h);
 	lv_obj_set_pos(dlg.panel, (screen_w - w) / 2, (screen_h - h) / 3);
@@ -383,9 +415,90 @@ static bool set_path(const char *name)
 	return true;
 }
 
-static void entry_clicked(lv_event_t *e)
+/** Strip the last component of dlg.dir, unless that would leave the root. */
+static bool go_up(void)
 {
-	const char *name = lv_event_get_user_data(e);
+	char *slash;
+
+	/* The floor is the directory the caller named, not the volume root.
+	 * A picker opened on /tmp should not walk out of /tmp any more than one
+	 * opened on the system directory should -- and this is also why there
+	 * is no enum zd_dir member naming the parent of anything: the floor is
+	 * a string we already have, and asking the session for one would make
+	 * "up" mean something different depending on where you started.
+	 */
+	if (strcmp(dlg.dir, dlg.root) == 0) {
+		return false;
+	}
+
+	slash = strrchr(dlg.dir, '/');
+	if (slash == NULL || slash == dlg.dir) {
+		return false;
+	}
+
+	*slash = '\0';
+	return true;
+}
+
+/** Descend into @p name, or leave dlg.dir alone if the result will not fit. */
+static bool go_down(const char *name)
+{
+	char next[ZD_PATH_MAX];
+	int n = snprintf(next, sizeof(next), "%s/%s", dlg.dir, name);
+
+	if (n < 0 || (size_t)n >= sizeof(next)) {
+		LOG_WRN("'%s' is too deep for a %u-byte path", name,
+			(unsigned int)sizeof(next));
+		return false;
+	}
+
+	strcpy(dlg.dir, next);
+	return true;
+}
+
+/*
+ * Where we are, in as few characters as will still distinguish two places.
+ *
+ * The path itself does not fit: ZD_PATH_MAX is 192 and the panel is 272 pixels
+ * wide. What fits, and is what the user actually wants to know, is the tail
+ * starting at the directory they were shown first -- so a picker opened on the
+ * home directory reads "user", then "user/docs", then "user/docs/old".
+ */
+static void show_where(void)
+{
+	const char *from = dlg.dir;
+	const char *slash;
+
+	if (dlg.where == NULL) {
+		return;
+	}
+
+	slash = strrchr(dlg.root, '/');
+	if (slash != NULL && slash > dlg.root) {
+		from = dlg.dir + (slash - dlg.root) + 1;
+	}
+
+	lv_label_set_text(dlg.where, from);
+}
+
+static void entry_selected(void *user, int32_t index, uint16_t id)
+{
+	char name[ZD_NAME_MAX];
+
+	ARG_UNUSED(user);
+
+	if ((id & ROW_IS_DIR) != 0) {
+		/* Selecting a directory is not choosing an answer. Blank the
+		 * path so OK cannot quietly return the last file that was
+		 * clicked before the user went wandering.
+		 */
+		dlg.path[0] = '\0';
+		return;
+	}
+
+	if (zd_rowlist_item_text(dlg.rl, index, name, sizeof(name)) < 0) {
+		return;
+	}
 
 	if (!set_path(name)) {
 		return;
@@ -396,8 +509,55 @@ static void entry_clicked(lv_event_t *e)
 	}
 }
 
+static void entry_activated(void *user, int32_t index, uint16_t id)
+{
+	char name[ZD_NAME_MAX];
+	size_t len;
+
+	ARG_UNUSED(user);
+
+	if (id == ROW_UP) {
+		dlg.relist = go_up();
+		dlg.path[0] = '\0';
+		return;
+	}
+
+	if (zd_rowlist_item_text(dlg.rl, index, name, sizeof(name)) < 0) {
+		return;
+	}
+
+	if ((id & ROW_IS_DIR) != 0) {
+		/* Directories are shown with a trailing slash, which no real
+		 * filename can contain, so taking it back off is unambiguous.
+		 */
+		len = strlen(name);
+		if (len > 0 && name[len - 1] == '/') {
+			name[len - 1] = '\0';
+		}
+
+		dlg.path[0] = '\0';
+		dlg.relist = go_down(name);
+		return;
+	}
+
+	if (!set_path(name)) {
+		return;
+	}
+
+	if (dlg.field != NULL) {
+		/* Save mode: put the name in the box and stop. Finishing here
+		 * would overwrite an existing file on a double-click, and there
+		 * is no "are you sure?" behind it yet.
+		 */
+		lv_textarea_set_text(dlg.field, name);
+		return;
+	}
+
+	finish(ZD_DLG_OK);
+}
+
 /*
- * List the directory.
+ * Fill the model from the directory.
  *
  * Straight fs_readdir rather than the zapp shim: this is the desktop, the path
  * came from the session's own enum rather than from anything a zapp said, and
@@ -405,12 +565,19 @@ static void entry_clicked(lv_event_t *e)
  * bus arbiter still has to bracket it -- on the CoreS3 the card cannot answer
  * while the display owns GPIO35, and this is a filesystem call site like any
  * other. See docs/hardware.md.
+ *
+ * Nothing here touches LVGL, and that is a fix rather than a coincidence. The
+ * version this replaces built rows inside the same bracket, which bus_arb.h
+ * says never to do; splitting the model from the view made the two halves fall
+ * into different functions on their own.
+ *
+ * Two passes so directories come first, which costs a second opendir and buys
+ * a listing that reads the way every file manager's does.
  */
-static int fill_list(int32_t w)
+static void scan(bool dirs)
 {
 	struct fs_dir_t dir;
-	int32_t y = 0;
-	int shown = 0;
+	char label[ZD_NAME_MAX];
 	int ret;
 
 	fs_dir_t_init(&dir);
@@ -418,50 +585,65 @@ static int fill_list(int32_t w)
 	zd_bus_storage_acquire();
 	ret = fs_opendir(&dir, dlg.dir);
 
-	while (ret == 0 && shown < CONFIG_ZD_DIALOG_LIST_MAX) {
+	while (ret == 0) {
 		static struct fs_dirent entry;
-		lv_obj_t *row;
-		lv_obj_t *label;
-		char *name;
+		bool is_dir;
 
 		if (fs_readdir(&dir, &entry) != 0 || entry.name[0] == '\0') {
 			break;
 		}
 
-		if (entry.type != FS_DIR_ENTRY_FILE) {
-			continue; /* no navigation yet; see the header comment */
+		is_dir = entry.type != FS_DIR_ENTRY_FILE;
+		if (is_dir != dirs) {
+			continue;
 		}
 
-		row = bare(dlg.list);
-		lv_obj_add_style(row, &zd_style_face, LV_PART_MAIN);
-		lv_obj_add_flag(row, LV_OBJ_FLAG_CLICKABLE);
-		lv_obj_set_size(row, w, ROW_H);
-		lv_obj_set_pos(row, 0, y);
-		y += ROW_H;
-		shown++;
+		if (is_dir) {
+			(void)snprintf(label, sizeof(label), "%s/", entry.name);
+		} else {
+			(void)strncpy(label, entry.name, sizeof(label) - 1);
+			label[sizeof(label) - 1] = '\0';
+		}
 
-		label = lv_label_create(row);
-		lv_label_set_long_mode(label, LV_LABEL_LONG_MODE_DOTS);
-		lv_label_set_text(label, entry.name);
-		lv_obj_set_style_text_font(label, &lv_font_montserrat_12, LV_PART_MAIN);
-		lv_obj_set_style_text_color(label, lv_color_hex(ZD_C_TEXT), LV_PART_MAIN);
-		lv_obj_set_width(label, w - 8);
-		lv_obj_set_pos(label, 4, (ROW_H - 12) / 2);
-
-		/* The label owns the only copy of the name that outlives this
-		 * loop, so the row's callback reads it back out rather than
-		 * keeping a pointer into `entry`, which is about to be reused.
-		 */
-		name = (char *)lv_label_get_text(label);
-		lv_obj_add_event_cb(row, entry_clicked, LV_EVENT_CLICKED, name);
+		if (zd_rowlist_add(dlg.rl, label,
+				   (uint16_t)(is_dir ? ROW_IS_DIR : 0)) < 0) {
+			LOG_WRN("'%s' has more entries than the list will hold",
+				dlg.dir);
+			break;
+		}
 	}
 
 	if (ret == 0) {
 		fs_closedir(&dir);
 	}
 	zd_bus_storage_release();
+}
 
-	return shown;
+static void fill_model(void)
+{
+	if (dlg.rl == NULL) {
+		return;
+	}
+
+	zd_rowlist_clear(dlg.rl);
+
+	if (strcmp(dlg.dir, dlg.root) != 0) {
+		/* A display string, never a path: fs_shim.c rejects ".." as a
+		 * component precisely so nobody can hand one to it, and go_up()
+		 * truncates instead.
+		 */
+		(void)zd_rowlist_add(dlg.rl, "..", ROW_UP);
+	}
+
+	scan(true);
+	scan(false);
+
+	/* Permanent tracing. Navigation is the one part of a picker whose state
+	 * is invisible from a screenshot -- two directories with similar
+	 * contents look identical -- and this is the line that says which one is
+	 * on screen. The menu trace added in K earned its keep the same way.
+	 */
+	LOG_DBG("picker listing %s (%d entries)", dlg.dir, zd_rowlist_count(dlg.rl));
 }
 
 int zd_dialog_file(struct zd_zapp_instance *owner, struct zd_client *client,
@@ -484,9 +666,9 @@ int zd_dialog_file(struct zd_zapp_instance *owner, struct zd_client *client,
 	}
 
 	want.arg = mode;
-	want.dir = dir;
 	(void)strncpy(dlg.dir, probe, sizeof(dlg.dir) - 1);
 	dlg.dir[sizeof(dlg.dir) - 1] = '\0';
+	strcpy(dlg.root, dlg.dir);
 
 	return 0;
 }
@@ -503,23 +685,30 @@ static void build_file(void)
 	int32_t y;
 	int32_t x;
 
-	list_h = MIN(screen_h / 2, 6 * ROW_H);
-	h = ZD_FRAME_PAD + TITLE_H + PAD + list_h + PAD + (save ? FIELD_H + PAD : 0) +
-	    BTN_H + PAD;
+	/* Six rows, or half the screen on a panel too short for six. The row
+	 * height is the list's, not ours: it scales with the touch slop and
+	 * getting a second copy of that arithmetic wrong is exactly how the
+	 * chrome sizes drifted apart before.
+	 */
+	list_h = MIN(screen_h / 2, 6 * zd_rowlist_row_h());
+	h = ZD_FRAME_PAD + TITLE_H + PAD + WHERE_H + list_h + PAD +
+	    (save ? FIELD_H + PAD : 0) + BTN_H + PAD;
 
 	y = open_panel(want.title, w, h);
 
-	dlg.list = lv_obj_create(dlg.panel);
-	lv_obj_remove_style_all(dlg.list);
-	lv_obj_add_style(dlg.list, &zd_style_face, LV_PART_MAIN);
-	lv_obj_set_style_bg_color(dlg.list, lv_color_hex(ZD_C_LIGHT), LV_PART_MAIN);
-	lv_obj_set_size(dlg.list, inner, list_h);
-	lv_obj_set_pos(dlg.list, PAD + ZD_FRAME_PAD, y);
-	lv_obj_set_scroll_dir(dlg.list, LV_DIR_VER);
-	zd_bevel_attach(dlg.list, ZD_BEVEL_IN);
+	/* Which directory this is. Without it, navigation is a list that
+	 * inexplicably changes -- the user has no other way to tell where "up"
+	 * would go, or that there is anywhere to go up to.
+	 */
+	dlg.where = text_at(dlg.panel, "", PAD + ZD_FRAME_PAD, y, inner, ZD_C_TEXT);
+	lv_label_set_long_mode(dlg.where, LV_LABEL_LONG_MODE_DOTS);
+	y += WHERE_H;
 
-	if (fill_list(inner) == 0) {
-		text_at(dlg.list, "(no files)", 4, 4, inner - 8, ZD_C_SHADOW);
+	dlg.rl = zd_rowlist_create(dlg.panel, PAD + ZD_FRAME_PAD, y, inner, list_h);
+	if (dlg.rl != NULL) {
+		zd_rowlist_set_cb(dlg.rl, entry_selected, entry_activated, NULL);
+		fill_model();
+		show_where();
 	}
 
 	y += list_h + PAD;
@@ -585,6 +774,14 @@ bool zd_dialog_key(uint32_t code, uint32_t unicode, uint16_t mods)
 		return true;
 	}
 
+	/* Arrows, Home, End and the page keys drive the list. Not Enter: what
+	 * Enter means depends on which dialog this is, and that is decided
+	 * below rather than by whichever widget answers first.
+	 */
+	if (dlg.rl != NULL && code != ZD_KEY_ENTER && zd_rowlist_key(dlg.rl, code, mods)) {
+		return true;
+	}
+
 	if (code == ZD_KEY_ENTER) {
 		/* Enter is the default button. In a save dialog that means
 		 * "use the name in the box", which is why the field is
@@ -600,10 +797,15 @@ bool zd_dialog_key(uint32_t code, uint32_t unicode, uint16_t mods)
 			return true;
 		}
 
-		/* An open dialog has no field, so Enter means "the one that is
-		 * chosen" -- and nothing at all until something is.
+		/* An open dialog has no field, so Enter means "the row that is
+		 * chosen" -- which for a directory means entering it, and is
+		 * why this goes through the list rather than straight to OK.
 		 */
-		if (!dlg.is_file || dlg.path[0] != '\0') {
+		if (dlg.rl != NULL && zd_rowlist_key(dlg.rl, ZD_KEY_ENTER, mods)) {
+			return true;
+		}
+
+		if (!dlg.is_file) {
 			finish(ZD_DLG_OK);
 		}
 		return true;
