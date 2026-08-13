@@ -9,7 +9,10 @@ Versions are the *desktop's*. The **zapp ABI has its own number**, currently
 0.7, and the two move independently: the ABI is what a `.llext` is compiled
 against and is governed by the append-only rules in [docs/abi.md](docs/abi.md).
 
-## Unreleased
+## v0.1.1 — 2026-08-12
+
+The documentation release. No behaviour changes; one real fix to the public
+header, and the docs a first-time reader needed and did not have.
 
 ### Documentation, rewritten for someone who has never seen this before
 
