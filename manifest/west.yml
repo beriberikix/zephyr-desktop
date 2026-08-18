@@ -49,5 +49,5 @@ manifest:
     # and the version skew is a thing to test rather than to inherit.
     - name: presto-zephyr
       remote: beriberikix
-      revision: f2c97c3b75826f38f2a5dedb02a34f56af221b7e
+      revision: 168c13c90d931d6ce85da6e2ba7f2ed701feb3c4
       path: modules/presto-zephyr
