@@ -25,6 +25,27 @@ if(BOARD STREQUAL "qemu_cortex_a53")
   list(APPEND QEMU_EXTRA_FLAGS -device virtio-keyboard-device,bus=virtio-mmio-bus.4)
 endif()
 
+# --- out-of-tree board support ------------------------------------------------
+#
+# The Pimoroni Presto is not an upstream Zephyr board. beriberikix/presto-zephyr
+# carries both halves -- the board files under boards/pimoroni/presto, and a
+# Zephyr module at drivers/presto holding the three drivers upstream does not
+# have (the ST7701 panel driven as parallel RGB out of two PIO state machines,
+# the APS6404 PSRAM behind QMI window 1, and a WS2812 fork that can reach a data
+# pin above GP31). manifest/west.yml pins it; this points the build at it.
+#
+# Above find_package for the same reason as the QEMU block: BOARD_ROOT is read
+# during find_package, so appending to it further down never arrives.
+if(BOARD MATCHES "presto")
+  set(ZD_PRESTO ${CMAKE_CURRENT_SOURCE_DIR}/../modules/presto-zephyr)
+  if(NOT EXISTS ${ZD_PRESTO})
+    message(FATAL_ERROR
+      "Presto board support is missing from ${ZD_PRESTO}. Run `west update`.")
+  endif()
+  list(APPEND BOARD_ROOT ${ZD_PRESTO})
+  list(APPEND ZEPHYR_EXTRA_MODULES ${ZD_PRESTO}/drivers/presto)
+endif()
+
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(zephyr_desktop LANGUAGES C)
 
@@ -121,6 +142,7 @@ target_sources_ifdef(CONFIG_ZD_SELFTEST app PRIVATE src/selftest.c)
 target_sources_ifdef(CONFIG_ZD_SMOKE_TEST app PRIVATE src/smoke.c)
 target_sources_ifdef(CONFIG_ZD_TOUCH_PROBE app PRIVATE src/touch_probe.c)
 target_sources_ifdef(CONFIG_ZD_SEED_BUILTIN_ZAPPS app PRIVATE src/loader/seed.c)
+target_sources_ifdef(CONFIG_ZD_LLEXT_HEAP_REGION app PRIVATE src/loader/llext_heap.c)
 
 # --- zapps --------------------------------------------------------------------
 #

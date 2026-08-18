@@ -27,6 +27,7 @@
 #include "host/text_api.h"
 #include "loader/zapp_instance.h"
 #include "loader/zapp_loader.h"
+#include "loader/llext_heap.h"
 #include "loader/seed.h"
 #include "shell/desktop.h"
 #include "shell/dialog.h"
@@ -104,6 +105,12 @@ int main(void)
 		LOG_ERR("display device %s not ready", display->name);
 		return -ENODEV;
 	}
+
+	/* Before anything can load a zapp -- the boot seed and the smoke test
+	 * both do -- and a no-op unless the board asked for its llext heap to
+	 * live somewhere other than SRAM.
+	 */
+	(void)zd_llext_heap_init();
 
 	ret = zd_storage_init();
 	if (ret != 0) {

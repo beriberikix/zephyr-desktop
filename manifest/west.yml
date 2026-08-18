@@ -15,6 +15,8 @@ manifest:
   remotes:
     - name: upstream
       url-base: https://github.com/zephyrproject-rtos
+    - name: beriberikix
+      url-base: https://github.com/beriberikix
 
   projects:
     - name: zephyr
@@ -28,7 +30,24 @@ manifest:
           - fatfs
           - hal_espressif # m5stack_cores3 (ESP32-S3)
           - hal_nxp   # milestone H: mimxrt1060_evk
+          - hal_rpi_pico # pimoroni_presto (RP2350B)
           - littlefs
           - lvgl
           - picolibc
           - segger
+
+    # The Pimoroni Presto board support, out of tree and not ours.
+    #
+    # This is a whole board port -- boards/pimoroni/presto plus a Zephyr module
+    # at drivers/presto holding three drivers upstream Zephyr does not have: the
+    # ST7701 panel in parallel-RGB (two PIO1 state machines and a DMA pair
+    # scanning a framebuffer out as DPI), the APS6404 PSRAM behind QMI window 1,
+    # and a WS2812 fork that can reach a data pin above GP31.
+    #
+    # It pins Zephyr v4.4.0 and we pin a main commit three months later, so its
+    # own west.yml is deliberately NOT imported -- this workspace's Zephyr wins,
+    # and the version skew is a thing to test rather than to inherit.
+    - name: presto-zephyr
+      remote: beriberikix
+      revision: 168c13c90d931d6ce85da6e2ba7f2ed701feb3c4
+      path: modules/presto-zephyr

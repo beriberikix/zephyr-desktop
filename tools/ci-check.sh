@@ -31,6 +31,7 @@
 #   tools/ci-check.sh                # everything, pristine builds
 #   ZD_CI_PRISTINE=0 tools/ci-check.sh   # incremental, for iterating locally
 #   ZD_CI_BOARDS=qemu tools/ci-check.sh  # just the one that can be run
+#                                        # (qemu|cores3|rt1060|presto|all)
 #
 # Exit status is the number of failed checks, capped at 250. Every check runs
 # even after one fails: a report that stops at the first broken board tells you
@@ -263,6 +264,20 @@ fi
 if [ "$want" = all ] || [ "$want" = rt1060 ]; then
 	if build_board mimxrt1060_evk/mimxrt1062/qspi "$out/rt1060"; then
 		check_llexts "$out/rt1060" 0
+	fi
+fi
+
+if [ "$want" = all ] || [ "$want" = presto ]; then
+	# The board support is out of tree (beriberikix/presto-zephyr, pinned in
+	# manifest/west.yml); app/CMakeLists.txt points BOARD_ROOT at it when the
+	# board name matches. If this fails to configure at all, the usual cause
+	# is a workspace that has not been `west update`d since that entry
+	# arrived, not anything in the board files.
+	#
+	# Cortex-M33, so the same arm-zephyr-eabi toolchain and the same REL
+	# llext as the RT1060 -- and the same expectation of zero stray imports.
+	if build_board presto/rp2350b/m33 "$out/presto"; then
+		check_llexts "$out/presto" 0
 	fi
 fi
 
