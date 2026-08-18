@@ -307,6 +307,49 @@ config ZD_ZAPP_LOAD_VIA_BUFFER
 	  Discovery is unaffected either way: the .llext is still a real file the
 	  desktop found on a real filesystem.
 
+config ZD_LLEXT_HEAP_REGION
+	bool "Put the llext heap in a named linker region instead of ordinary RAM"
+	depends on LLEXT
+	select LLEXT_HEAP_DYNAMIC
+	help
+	  By default llext carves its heap out of the same SRAM as everything
+	  else, sized by CONFIG_LLEXT_HEAP_SIZE. That works wherever SRAM is the
+	  only memory there is.
+
+	  It does not work on a board whose SRAM is already spoken for. The
+	  pimoroni_presto is the case this exists for: 520 KB of SRAM, 450 KB of
+	  which is the display's framebuffer, and the framebuffer cannot move --
+	  it is scanned out continuously by DMA, and the 8 MB of PSRAM it might
+	  otherwise live in is reached over the QMI bus shared with flash XIP,
+	  which underruns. So the framebuffer stays and the llext heap moves.
+
+	  Zapp *code* runs from this heap, so the region has to be executable.
+	  That is free on the Presto because the MPU is off there, but a board
+	  that turns CONFIG_ARM_MPU on must give the region an executable
+	  attribute (ATTR_MPU_EXTMEM, not ATTR_MPU_RAM) or every zapp will fault
+	  on its first instruction.
+
+config ZD_LLEXT_HEAP_REGION_NAME
+	string "Linker region to place the llext heap in"
+	default "PSRAM"
+	depends on ZD_LLEXT_HEAP_REGION
+	help
+	  Must match a zephyr,memory-region name in the devicetree. The buffer is
+	  placed with Z_GENERIC_SECTION, which is the same mechanism LVGL's own
+	  pool uses (CONFIG_LV_Z_MEMORY_POOL_ZEPHYR_REGION_NAME) -- and, usefully,
+	  one that leaves the buffer out of the .bss clear at boot, so nothing
+	  touches the memory before the driver backing it has come up.
+
+config ZD_LLEXT_HEAP_REGION_KB
+	int "Size of the llext heap when it lives in a linker region"
+	default 384
+	depends on ZD_LLEXT_HEAP_REGION
+	help
+	  Kilobytes. The equivalent of CONFIG_LLEXT_HEAP_SIZE, which is not used
+	  in this mode -- it depends on !LLEXT_HEAP_DYNAMIC, so setting it here
+	  would warn and do nothing, which is exactly the class of silent no-op
+	  the board fragments warn about elsewhere.
+
 config ZD_TOUCH_SLOP_PX
 	int "Extra pixels of hit area around small controls"
 	default 0

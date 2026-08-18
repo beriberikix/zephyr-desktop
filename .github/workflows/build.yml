@@ -57,7 +57,7 @@ jobs:
           echo "zephyr pinned at $(git -C zephyr rev-parse --short=12 HEAD)"
           echo "sdk ${ZEPHYR_SDK_INSTALL_DIR:-<unset>} (want $(cat zephyr/SDK_VERSION))"
 
-      # Three boards built pristine, both QEMU images run, every .llext's
+      # Four boards built pristine, both QEMU images run, every .llext's
       # imports checked, and the Kconfig warnings read per board. Exit status is
       # the number of failed checks.
       - name: Build every board and run every check

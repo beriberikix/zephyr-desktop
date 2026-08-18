@@ -1,0 +1,107 @@
+/*
+ * pimoroni_presto — panel, touch, console and the volume zapps are found on.
+ *
+ * The board's own presto.dtsi describes all the hardware and leaves the
+ * contentious parts disabled; this turns on the three the desktop needs.
+ */
+
+/ {
+	chosen {
+		zephyr,display = &st7701;
+
+		/* CONFIG_LV_Z_POINTER_FROM_CHOSEN_TOUCH turns this into LVGL's
+		 * pointer, which is the whole of the input wiring.
+		 *
+		 * It points at the scaler, not the digitiser: the FT6236 reports
+		 * panel-space coordinates (0-480) and the framebuffer is half
+		 * that, so they have to be halved on the way in. It must happen
+		 * here rather than anywhere later -- LVGL's pointer glue clamps
+		 * to the display bounds, so scaling after it would fold the
+		 * lower-right quadrant of the panel onto the centre.
+		 *
+		 * The scaler re-emits under its own device, which is what lets
+		 * it stand in for the digitiser as the chosen touch.
+		 */
+		zephyr,touch = &touch_scaler;
+
+		zephyr,console = &cdc_acm_uart0;
+		zephyr,shell-uart = &cdc_acm_uart0;
+	};
+
+	/* Halves FT6236 coordinates for the half-resolution framebuffer. Delete
+	 * this node and point zephyr,touch back at &ft6236 if the panel is ever
+	 * driven at its full 480x480 -- see the board .conf for what that costs.
+	 */
+	touch_scaler: touch-scaler {
+		compatible = "pimoroni,input-scaler";
+		input = <&ft6236>;
+		scale-num = <1>;
+		scale-denom = <2>;
+	};
+};
+
+&st7701 {
+	status = "okay";
+};
+
+/*
+ * The microSD slot, which is where zapps come from.
+ *
+ * All three levels have to be enabled explicitly. Zephyr decides a node's
+ * status without looking at its parent, so enabling only the bus leaves two
+ * drivers dangling and enabling only the slot builds a driver whose bus was
+ * never created -- and that failure surfaces as an undefined
+ * __device_dts_ord_N at link time, mentioning nothing about SPI.
+ *
+ * Nothing is carved out of PSRAM any more: the RAM disk this board booted from
+ * during bring-up lived at the top of the chip, and with a real filesystem it is
+ * gone, so the linker region covers the whole 8 MB again.
+ */
+&spi0 {
+	status = "okay";
+};
+
+&sdhc0 {
+	status = "okay";
+};
+
+&sdmmc0 {
+	status = "okay";
+};
+
+&zephyr_udc0 {
+	cdc_acm_uart0: cdc_acm_uart0 {
+		compatible = "zephyr,cdc-acm-uart";
+
+		/*
+		 * 8 KB of TX FIFO against a default of 1024, because the default
+		 * silently truncates this desktop's boot.
+		 *
+		 * A full-speed bulk endpoint moves 64 bytes per 1 ms frame, so
+		 * the console drains at about 64 KB/s while the boot burst --
+		 * mount, seed, discovery, two rounds of selftest -- is emitted
+		 * in a few tens of milliseconds by synchronous logging. The FIFO
+		 * has to absorb the difference, and at 1024 bytes it does not:
+		 * output stopped mid-word at exactly 1024 bytes and every
+		 * selftest line after it was lost.
+		 *
+		 * That is the failure prj.conf chose LOG_MODE_IMMEDIATE to avoid
+		 * -- a self-test whose FAIL line can be dropped is worse than no
+		 * self-test -- reappearing one layer down, in the transport
+		 * rather than the log buffer.
+		 *
+		 * 8192 was measured and still truncated, at exactly the FIFO
+		 * boundary again: the burst is larger than 8 KB with ZD logging
+		 * at DBG. 16 KB holds it.
+		 *
+		 * This is 16 KB of the SRAM that full resolution was refused for
+		 * 13 KB of, which is worth stating rather than glossing: a
+		 * console that drops selftest results is a worse trade than a
+		 * smaller framebuffer, but it is a trade. Dropping ZD logging to
+		 * INF cuts the burst by more than half and costs nothing, so
+		 * that is the first thing to reach for if this SRAM is ever
+		 * wanted back.
+		 */
+		tx-fifo-size = <16384>;
+	};
+};
