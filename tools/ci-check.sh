@@ -31,6 +31,7 @@
 #   tools/ci-check.sh                # everything, pristine builds
 #   ZD_CI_PRISTINE=0 tools/ci-check.sh   # incremental, for iterating locally
 #   ZD_CI_BOARDS=qemu tools/ci-check.sh  # just the one that can be run
+#   ZD_CI_BOARDS=net  tools/ci-check.sh  # just the networking build (clippy)
 #                                        # (qemu|cores3|rt1060|presto|all)
 #
 # Exit status is the number of failed checks, capped at 250. Every check runs
@@ -250,6 +251,38 @@ if [ "$want" = all ] || [ "$want" = qemu ]; then
 	if build_board qemu_cortex_a53 "$out/smoke" -- -DEXTRA_CONF_FILE=smoke.conf; then
 		run_qemu "smoke: no leaks, and the ABI gate still bites" "$out/smoke" \
 			'wait:30' 'expect:SMOKE: PASS'
+	fi
+fi
+
+# The networking build, and the only one that compiles the clippy zapp.
+#
+# Kept as its own configuration rather than folded into the default, because a
+# desktop that does not need the network should not carry a TCP stack -- and
+# because the default build's launcher check asserts a zapp count that clippy
+# would change. Two configurations is the honest way to have both.
+if [ "$want" = all ] || [ "$want" = net ]; then
+	if build_board qemu_cortex_a53 "$out/net" -- -DCONFIG_ZD_NET=y; then
+		# Same expectation as every other REL build: a zapp imports
+		# nothing. This is the check that matters most for clippy, whose
+		# elapsed-seconds arithmetic is exactly the shape that makes GCC
+		# reach for a libgcc helper nobody wrote.
+		check_llexts "$out/net" 0
+
+		# Seven now: the six the default build has, plus clippy, which
+		# seed.c installs only under CONFIG_ZD_NET.
+		run_qemu "clippy is discovered when networking is on" "$out/net" \
+			'wait:3' 'click:20,258' 'expect:discovered 7 zapp(s)'
+	fi
+
+	# Launching it goes through the smoke test rather than a click at guessed
+	# coordinates: smoke.conf already loads every seeded zapp and proves the
+	# handle and instance counters came back. With networking on, "every" now
+	# includes clippy, so this is the check that the 0.8 vtable and the
+	# manifest's abi_minor >= 8 gate actually agree.
+	if build_board qemu_cortex_a53 "$out/netsmoke" \
+		-- -DEXTRA_CONF_FILE=smoke.conf -DCONFIG_ZD_NET=y; then
+		run_qemu "smoke with networking: clippy loads and unloads cleanly" \
+			"$out/netsmoke" 'wait:40' 'expect:SMOKE: PASS'
 	fi
 fi
 

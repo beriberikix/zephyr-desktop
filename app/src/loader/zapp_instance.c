@@ -20,6 +20,7 @@
 #include "../host/bus_arb.h"
 #include "../host/fs_api.h"
 #include "../host/host_api.h"
+#include "../host/http_api.h"
 #include "../host/timer_api.h"
 #include "../shell/dialog.h"
 #include "../wm/handle.h"
@@ -704,6 +705,10 @@ static void finish_unload(struct zd_zapp_instance *inst)
 	 * clock.
 	 */
 	zd_timer_owner_gone(inst);
+	/* Beside the timers and for the same reason: a response that lands
+	 * after its zapp has gone must not be dispatched into unmapped text.
+	 */
+	zd_http_owner_gone(inst);
 
 	/* Files first, and only after fini() -- which is a zapp's last chance to
 	 * flush. zd_handle_free_all() below only invalidates handles; on its own
