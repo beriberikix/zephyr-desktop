@@ -185,12 +185,16 @@ target_sources_ifdef(CONFIG_ZD_LLEXT_HEAP_REGION app PRIVATE src/loader/llext_he
 
 set(ZD_ZAPP_NAMES hello notes badabi notepad files mines)
 
-# clippy only where there is a network to reach. Built unconditionally at first,
-# which broke every board that is not the networking one: a zapp whose only
-# possible answer is -ENOSYS is not worth the flash, and seed.c already guards
-# the install the same way. This is below find_package(Zephyr), so unlike the
-# QEMU flags above, CONFIG_* is readable here.
-if(CONFIG_ZD_NET)
+# clippy only where it is wanted. Built unconditionally at first, which broke
+# every board that is not the networking one: a zapp whose only possible answer
+# is -ENOSYS is not worth the flash on a board that will never have a network.
+#
+# The knob is ZD_CLIPPY rather than ZD_NET, and it defaults to following ZD_NET,
+# so the behaviour is unchanged -- but it can be forced on without the TCP stack
+# to build the zapp's UI on its own. seed.c guards the install with the same
+# symbol. This is below find_package(Zephyr), so unlike the QEMU flags above,
+# CONFIG_* is readable here.
+if(CONFIG_ZD_CLIPPY)
   list(APPEND ZD_ZAPP_NAMES clippy)
 endif()
 

@@ -207,6 +207,26 @@ config ZD_NET
 	  Off by default. A desktop that does not need the network should not
 	  carry a TCP stack.
 
+config ZD_CLIPPY
+	bool "Build and seed the clippy zapp"
+	default y if ZD_NET
+	help
+	  Normally follows ZD_NET, because an assistant that cannot make a
+	  request is not worth the flash.
+
+	  It is a separate knob so it can be forced on *without* the TCP stack,
+	  which is how the zapp's own UI gets worked on and screenshotted. With
+	  networking off, http_request() answers -ENOSYS and clippy shows that as
+	  its error state -- the window, the paperclip, the animation and the
+	  question box are all exactly what they are on a networking build. It
+	  builds in a fraction of the time and cannot fail for a reason that
+	  lives in the IP stack.
+
+	  Forcing it on is a build-time choice, so it is spelled out on the
+	  command line rather than defaulted anywhere:
+
+	    west build -b qemu_cortex_a53 app -- -DCONFIG_ZD_CLIPPY=y
+
 config ZD_HTTP_MAX_REQUESTS
 	int "Concurrent zapp HTTP requests"
 	depends on ZD_NET
