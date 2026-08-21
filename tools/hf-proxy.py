@@ -126,11 +126,39 @@ def strip_markdown(text: str) -> str:
     return "\n".join(flattened).strip()
 
 
+# A canned answer, for CI and for working on the zapp offline.
+#
+# The real Space runs its model on CPU and takes tens of seconds, which makes it
+# a poor thing to put in a build: slow, and a network dependency that fails for
+# reasons that have nothing to do with the change under test. The stub answers
+# instantly with the same shape of content, so a screenshot is reproducible and
+# the UI can be iterated on without a round trip.
+STUB_ANSWER = """Devicetree bindings live in dts/bindings/ and are YAML.
+
+A binding declares the compatible string a node claims, and the properties
+a driver may then read:
+
+  compatible: "vendor,my-sensor"
+  include: sensor-device.yaml
+  properties:
+    int-gpios:
+      type: phandle-array
+      required: true
+
+The build matches a node's compatible to the binding, and DT_INST_* macros
+then give the driver typed access to those properties.
+
+  build/dts/bindings - Devicetree bindings
+  https://docs.zephyrproject.org/latest/build/dts/bindings.html
+"""
+
+
 class Handler(BaseHTTPRequestHandler):
     space = DEFAULT_SPACE
     api = DEFAULT_API
     k = DEFAULT_K
     raw = False
+    stub = False
 
     def _reply(self, status: int, body: str) -> None:
         payload = body.encode("utf-8", "replace")
@@ -159,6 +187,11 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         print(f"  -> {question}", flush=True)
+        if self.stub:
+            print("  <- stub", flush=True)
+            self._reply(200, STUB_ANSWER)
+            return
+
         try:
             answer = ask_space(self.space, self.api, question, self.k)
         except SpaceError as error:
@@ -187,15 +220,22 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--raw", action="store_true",
                         help="do not flatten markdown")
+    parser.add_argument("--stub", action="store_true",
+                        help="answer instantly from a canned reply; never touch "
+                             "the network. For CI and offline UI work.")
     args = parser.parse_args()
 
     Handler.space = args.space
     Handler.api = args.api
     Handler.k = args.k
     Handler.raw = args.raw
+    Handler.stub = args.stub
 
     server = ThreadingHTTPServer((args.host, args.port), Handler)
-    print(f"hf-proxy -> {space_base(args.space)}/gradio_api/call/{args.api}")
+    if args.stub:
+        print("hf-proxy -> STUB (canned answer, no network)")
+    else:
+        print(f"hf-proxy -> {space_base(args.space)}/gradio_api/call/{args.api}")
     print(f"listening on http://{args.host}:{args.port}/ask")
     print("from QEMU the desktop reaches this at http://10.0.2.2:%d/ask" % args.port)
     try:

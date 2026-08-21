@@ -126,7 +126,13 @@ static void say_waiting(zd_zapp_ctx_t ctx, struct state *st)
 	 * cleanly and then fails to load on the CoreS3. The project has been
 	 * bitten by exactly this.
 	 */
-	uint32_t elapsed = (uint32_t)(host->uptime_ms(ctx) - st->started_ms) / 1000U;
+	/* Narrowed to 32 bits before the subtract, not after: uptime_ms()
+	 * returns int64_t, and a 64-bit divide is one instruction on arm64 but a
+	 * call to libgcc's __divdi3 on Xtensa, which builds cleanly and then
+	 * fails to load on the CoreS3. Everything after this line is 32-bit.
+	 */
+	uint32_t now = (uint32_t)host->uptime_ms();
+	uint32_t elapsed = (now - st->started_ms) / 1000U;
 
 	at = z_strcpy(st->scratch, sizeof(st->scratch), "Thinking");
 	at = z_append(st->scratch, at, sizeof(st->scratch), "... ");
@@ -175,7 +181,7 @@ static void ask(zd_zapp_ctx_t ctx, struct state *st)
 	}
 
 	st->waiting = true;
-	st->started_ms = (uint32_t)host->uptime_ms(ctx);
+	st->started_ms = (uint32_t)host->uptime_ms();
 	st->mood = CLIPPY_BUSY;
 	st->tick = 0;
 	draw_face(ctx, st);

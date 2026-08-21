@@ -63,6 +63,37 @@ jobs:
       - name: Build every board and run every check
         run: tools/ci-check.sh
 
+      # Pixels, not console text. Every other check here asserts on what the
+      # desktop *said*; a desktop that boots, logs everything expected and
+      # draws nothing would pass all of them. These are also the images
+      # docs/clippy.md refers to, so they are produced by the build rather
+      # than pasted in from someone's laptop and never updated again.
+      #
+      # The proxy runs in --stub mode: the real Space takes tens of seconds on
+      # CPU and would make this slow and flaky for reasons unrelated to the
+      # change under test.
+      - name: Screenshot the desktop and clippy
+        if: always()
+        run: |
+          if [ ! -d build-ci/net ]; then
+            echo "no networking build to shoot; skipping"
+            exit 0
+          fi
+          python3 tools/hf-proxy.py --stub --port 8080 &
+          proxy=$!
+          # shot.py takes fractions of the screen, not pixels. 480x272, so the
+          # Start button sits at roughly 0.04,0.95.
+          python3 tools/shot.py -d build-ci/net -o build-ci/shots             --shot desktop             --click 0.04,0.95 --shot launcher             || echo "shot.py exited $? (screenshots are not a gate)"
+          kill $proxy 2>/dev/null || true
+
+      - name: Keep the screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: build-ci/shots/*
+          if-no-files-found: warn
+
       - name: Keep the build logs, whatever happened
         if: always()
         uses: actions/upload-artifact@v4
