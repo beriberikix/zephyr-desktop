@@ -24,8 +24,21 @@ LOG_MODULE_REGISTER(zd_http, CONFIG_ZD_LOG_LEVEL);
 #include <zephyr/net/socket.h>
 #endif
 
+/* This file is compiled on every board, because main() calls zd_http_pump()
+ * and the loader calls zd_http_owner_gone() unconditionally -- stubbing those
+ * out per board would put an #ifdef in two files to save one here. But the
+ * Kconfig symbols only exist under ZD_NET, so a build without networking has
+ * to get its sizes from somewhere. One slot of one byte: the arrays still
+ * exist, every entry field stays valid, and zd_http_request() returns -ENOSYS
+ * before anything looks at them.
+ */
+#ifdef CONFIG_ZD_NET
 #define SLOTS    CONFIG_ZD_HTTP_MAX_REQUESTS
 #define BODY_CAP CONFIG_ZD_HTTP_BODY_MAX
+#else
+#define SLOTS    1
+#define BODY_CAP 1
+#endif
 
 enum slot_state {
 	SLOT_FREE = 0,

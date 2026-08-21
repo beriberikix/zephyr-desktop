@@ -185,6 +185,15 @@ config ZD_NET
 	select NET_SOCKETS_POSIX_NAMES if !POSIX_API
 	select DNS_RESOLVER
 	select NET_DHCPV4
+	# The IP stack needs sys_rand_get() for ephemeral ports, the TCP initial
+	# sequence number and DHCP backoff. qemu_cortex_a53 has no entropy
+	# device, so without this the link fails on undefined z_impl_sys_rand_get
+	# rather than on anything in this file.
+	#
+	# Not a CSPRNG, and it does not need to be: nothing here is
+	# cryptographic, because there is deliberately no TLS. A board that grows
+	# one should select a real entropy source at the same time.
+	select TEST_RANDOM_GENERATOR
 	help
 	  Adds the 0.8 http_request/http_read/http_release calls and the
 	  ZD_EV_HTTP_RESPONSE event.
