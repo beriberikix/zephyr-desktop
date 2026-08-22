@@ -1,14 +1,12 @@
 # clippy — asking a model from a zapp
 
-> **Status: not built or run.** This landed in a checkout with no west
-> workspace (`zephyr/` and `modules/` are west-managed and gitignored, and
-> there is no `.west/`), so none of the firmware here has been compiled, and
-> the one open question below has not been settled. The host-side proxy *is*
-> verified against the live Space. Read the last section before trusting any
-> of this.
-
 Clippy asks a Hugging Face Space a question about Zephyr and shows the answer.
 It is the first zapp that waits on something the desktop does not control.
+
+![Clippy open on the retro desktop, showing the paperclip and its greeting](images/clippy.png)
+
+That image is produced by CI, from a build, on every run -- see
+[Screenshots](#screenshots) below. Nothing here is a mock-up.
 
 ## Why it needed a new piece of ABI
 
@@ -79,6 +77,22 @@ west build -b qemu_cortex_a53 app -- -DCONFIG_ZD_NET=y
 west build -t run
 ```
 
+### Without the network
+
+`CONFIG_ZD_CLIPPY` is a separate knob from `CONFIG_ZD_NET`. It defaults to
+following it, because an assistant that cannot make a request is not worth the
+flash on a board that will never have a network. Forcing it on builds the zapp
+with `http_request()` answering `-ENOSYS`:
+
+```bash
+west build -b qemu_cortex_a53 app -- -DCONFIG_ZD_CLIPPY=y
+```
+
+This is not a degraded mode. The window, the paperclip, its animation, the
+question box and the error path are identical; the only difference is which
+failure the request reports. It builds in a fraction of the time, cannot fail
+for a reason that lives in the IP stack, and is what the screenshots come from.
+
 The proxy binds `0.0.0.0:8080` so QEMU's user-mode alias `10.0.2.2` can reach
 it. That address is compiled into `zapps/clippy/clippy.c`; a real device would
 point somewhere reachable on its own network.
@@ -92,40 +106,98 @@ python tools/hf-proxy.py --space eoinedge/ros2
 The proxy is a development tool. No authentication, no rate limiting; do not
 expose it to a network you do not control.
 
+## Screenshots
+
+```bash
+tools/shot-clippy.sh -d build-ci/clippy -o shots
+```
+
+Boots the image headlessly, clicks Start, clicks the clippy row and writes three
+PNGs plus the serial console. CI runs it on every build and uploads the results,
+so the images in this file are produced by a build rather than pasted in from
+someone's laptop and never updated again.
+
+![The launcher listing the seven seeded zapps](images/launcher.png)
+
+Two things in that script are worth knowing if you change it.
+
+**The click is derived, not eyeballed.** `shot.py` takes fractions of the
+screen, and the launcher panel is bottom-anchored above the taskbar and grows
+*upward* with the zapp count -- so every row moves when a zapp is added. The
+script computes the position from the same constants the C does, and names each
+one, so a change to any of them shows up as a wrong click rather than a mystery.
+
+**It then reads the console.** A wrong row is otherwise a perfectly good
+screenshot of the wrong window. The launcher logs `launch '<name>'`, which is
+the only thing that can say what was actually hit.
+
+Note that `shot.py` runs QEMU with `-net none`. Even on a `ZD_NET` build the
+desktop cannot reach a proxy from there, which is why the screenshots come from
+the `ZD_CLIPPY` build and show clippy's UI rather than an answer.
+
 ## What is verified and what is not
 
-**Verified.** The proxy, end to end against the live Space:
+**Verified in CI**, on `qemu_cortex_a53`, `CONFIG_ZD_CLIPPY=y`, every run:
+
+- The zapp builds, and `nm -u clippy.llext` imports nothing but
+  `zd_get_host_api`. This is the check that mattered most: the elapsed-seconds
+  arithmetic in clippy is exactly the shape that makes GCC reach for a libgcc
+  helper nobody wrote, and it does not.
+- The launcher discovers seven zapps from the filesystem, through a real click.
+- The smoke test launches clippy, opens its window, closes it and unloads the
+  extension with the client, handle, open-file and instance counters back at
+  their boot values.
+- The pixels above.
+
+**Verified on the development host.** The proxy, end to end against the live
+Space:
 
 ```
   -> How do I define a devicetree binding?
   <- 2809 bytes
 ```
 
-It returned real Zephyr documentation with source citations and similarity
-scores, flattened out of markdown into something a fixed-width text widget can
-show.
+Real Zephyr documentation with source citations and similarity scores, flattened
+out of markdown into something a fixed-width text widget can show.
 
-**Not verified.** Everything on the device. No build, no run, no `nm -u` check
-on `clippy.llext` — and that last one matters, because this project's standing
-trap is the compiler emitting a call nobody wrote. Clippy avoids the two known
-ones on purpose: `z_zero()` instead of a struct assignment that GCC turns into
-`memset`, and a `uint32_t` narrowing before the elapsed-seconds divide so
-Xtensa does not reach for `__divdi3`. Those are precautions taken from the
-documented history, not observations.
+**Not verified: the two ends joined up.** No run has yet had the desktop fetch
+an answer from the proxy and draw it, because the only automated harness for
+pixels deliberately runs with no network. The networking build compiles, links
+and boots -- the open question about whether `qemu_cortex_a53` could carry
+virtio-net at all is settled, and it can -- but a screenshot of a real answer on
+the screen needs `west build -t run` and a human.
 
-**The open question.** `qemu_cortex_a53` has no ethernet in its devicetree, and
-I could not check whether the Zephyr revision this project pins carries a
-virtio-net driver that would bind to `virtio-mmio-bus.5`. If it does not, the
-transport has to change — Zephyr's usual QEMU networking is SLIP over a spare
-UART with `net-tools` on the host, which works on any board but needs more host
-setup than user-mode networking. **Nothing above the transport changes either
-way**: the ABI, the worker, the pump, the zapp and the proxy are all unaffected.
+**Not verified: any of it on hardware.** The CoreS3 has WiFi and is the board
+this would be most interesting on. Nobody has tried.
 
-That is the first thing to settle when a west workspace is available:
+## Three bugs it found on the way in
 
-```bash
-west build -b qemu_cortex_a53 app -- -DCONFIG_ZD_NET=y
-```
+Worth recording, because none of them were in clippy.
 
-and read the Kconfig warnings per board, as CLAUDE.md insists — a knob that
-does not exist on a target is a knob that silently does nothing.
+**The window slab.** Five zapps already open eight windows between them, and
+`CONFIG_ZD_MAX_CLIENTS` is 8 desktop-wide, so the smoke test was exactly full
+before clippy asked for a ninth. Raised to 16 in `smoke.conf` only -- the
+default is a statement about how many windows a user plausibly has, and the
+smoke test is not a user. The smoke test diagnosed this itself, reporting that
+the failure was "not the ABI gate refusing it", which is the check milestone M
+added after milestone K predicted precisely this confusion.
+
+**The smoke drain counted the wrong thing.** It waited
+`(CLOSE_GRACE_MS / TICK_MAX_MS) + 8` loop *iterations*, which assumes every pass
+round the desktop loop sleeps the full `TICK_MAX_MS`. It does not: `main()`
+sleeps `MIN(what lv_timer_handler asked for, TICK_MAX_MS)`, so a zapp with a
+running LVGL timer shortens every iteration -- while the close grace being
+waited for is wall clock. Clippy is the first zapp with a *continuously*
+running one (a 400 ms animation), which put the test right on the 2 s boundary:
+round 1 drained in 2.14 s and passed, round 2 in 1.84 s and reported a leak of
+clients that were about to be reaped anyway. The direction of that error is the
+part worth keeping: the same bug would have produced a false **pass** just as
+readily, by checking the counters before a real leak had appeared. It waits on
+the clock now.
+
+**`shot.py` guessed where QEMU was.** `$ZEPHYR_SDK_INSTALL_DIR/hosttools/...`
+with a `~/zephyr-sdk-<version>` fallback -- and on a CI runner the variable is
+unset and the SDK is wherever the setup action cached it, so it died naming a
+path that had never existed on that machine. `ci-check.sh` had already learned
+this and reads the build's own `CMakeCache.txt`; `shot.py` does too now. The
+lesson was written down in one tool and not the other.

@@ -63,8 +63,13 @@ tens of seconds. Everything in the ABI before it finished before it returned,
 which is fine until a callback on the drawing thread wants an answer from the
 internet. ABI 0.8 adds a request that returns immediately and an event that
 arrives later, on the same queue keystrokes use — so the clock keeps ticking and
-the other windows keep dragging while a paperclip thinks. See
-[docs/clippy.md](docs/clippy.md), including what has and has not been verified.
+the other windows keep dragging while a paperclip thinks.
+
+![Clippy open on the desktop](docs/images/clippy.png)
+
+CI builds the zapp, checks it imports nothing, launches it, unloads it and takes
+that screenshot on every run. See [docs/clippy.md](docs/clippy.md) — including
+the three bugs it found on the way in, none of which were in Clippy.
 
 **Nothing is destroyed during dispatch.** An app closing its own window is
 running on a stack frame inside code that unloading would free. Every destroy is
@@ -86,7 +91,8 @@ around, and [docs/architecture.md](docs/architecture.md) explains why.
   0.8 HTTP calls; `http_request()` refuses `https://` rather than downgrading
   it, because a desktop with no trust store should not pretend otherwise. The
   Clippy app reaches its Space through `tools/hf-proxy.py` on the development
-  host, which terminates TLS there.
+  host, which terminates TLS there. `CONFIG_ZD_CLIPPY=y` builds the app without
+  the TCP stack, which is how its UI gets worked on.
 
 Also: Zephyr is pinned to a `main` commit rather than a release, because the
 QEMU display and pointer stack this needs is in no release tag yet; and
