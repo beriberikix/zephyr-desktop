@@ -1,5 +1,5 @@
 /*
- * clippy — "It looks like you're writing an RTOS."
+ * clippy — "It looks like you're getting started with Zephyr."
  *
  * Asks a Hugging Face Space a question about Zephyr and shows the answer. It
  * is the first zapp that waits on something the desktop does not control, and
@@ -350,7 +350,7 @@ static int clippy_init(zd_zapp_ctx_t ctx, const struct zd_host_api *api)
 	st->mood = CLIPPY_IDLE;
 	draw_face(ctx, st);
 	api->text_set_text(ctx, st->entry, "");
-	say(ctx, st, "It looks like you're writing an RTOS. Need help?");
+	say(ctx, st, "It looks like you're getting started with Zephyr. Need help?");
 	show_answer(ctx, st,
 		    "Ask me about Zephyr and press Enter.\n\n"
 		    "Answers come from a retrieval index built over the Zephyr\n"
