@@ -29,17 +29,18 @@ LOG_MODULE_DECLARE(zd_main, CONFIG_ZD_LOG_LEVEL);
 #define BALLOON_FONT (&lv_font_montserrat_12)
 
 /* The icon box. Fixed rather than scaled with CONFIG_ZD_TOUCH_SLOP_PX, because
- * slop sizes things a finger has to hit and nothing here is clickable. 36x56 is
- * the smallest at which the eyes still read as eyes on a 320x240 panel.
+ * slop sizes things a finger has to hit and nothing here is clickable. 40x64 is
+ * the smallest at which the two loops still read as a paperclip rather than as
+ * a blob behind a pair of eyes.
  */
-#define ICON_W 36
-#define ICON_H 56
+#define ICON_W 40
+#define ICON_H 64
 #define ICON_GAP 4
 
 /* Wire thickness of the paperclip. Three is too thin to see the loop; five
  * closes the gap between the two loops at this size.
  */
-#define WIRE 4
+#define WIRE 5
 
 /* Office-assistant yellow. Not in theme.h with the system palette on purpose:
  * that palette is the Win95 *system* one, every entry of which is a real
@@ -52,9 +53,14 @@ LOG_MODULE_DECLARE(zd_main, CONFIG_ZD_LOG_LEVEL);
 
 /* The clip. Two periwinkles: the near limb light, the far limb darker, which is
  * the only depth cue available without gradients.
+ *
+ * Darker than the reference art, on purpose. The clip is drawn on the window's
+ * own #C0C0C0 face, and the periwinkle these are tinted from disappears against
+ * it -- the first build had a paperclip nobody could see. Contrast against the
+ * background it actually sits on beats fidelity to a colour picked off a PNG.
  */
-#define C_CLIP      0x9090B8
-#define C_CLIP_DARK 0x70709A
+#define C_CLIP      0x7676A8
+#define C_CLIP_DARK 0x4C4C78
 
 #define C_EYE   0xFFFFFF
 #define C_PUPIL 0x000000
@@ -128,10 +134,10 @@ static void wire(lv_layer_t *layer, int32_t x1, int32_t y1, int32_t x2, int32_t 
 static void brow(lv_layer_t *layer, int32_t x, int32_t y, int32_t dir)
 {
 	for (int32_t i = 0; i < 3; i++) {
-		int32_t sx = x + dir * i * 5;
-		int32_t sy = y + i;
+		int32_t sx = x + dir * i * 6;
+		int32_t sy = y + i * 2;
 
-		fill(layer, MIN(sx, sx + dir * 5), sy, MAX(sx, sx + dir * 5), sy + 2,
+		fill(layer, MIN(sx, sx + dir * 6), sy, MAX(sx, sx + dir * 6), sy + 2,
 		     C_PUPIL, 1);
 	}
 }
@@ -151,53 +157,55 @@ static void draw_clip(lv_layer_t *layer, int32_t ox, int32_t oy, uint32_t state)
 	/* Outer loop, opening downward. Drawn first so the inner one and the
 	 * eyes sit over it.
 	 */
-	wire(layer, ox + 2 + lean, oy + 2, ox + 30 + lean, oy + 44, C_CLIP_DARK, 14, WIRE);
+	wire(layer, ox + 3 + lean, oy + 2, ox + 33 + lean, oy + 48, C_CLIP_DARK, 15, WIRE);
 
 	/* Inner loop, opening upward and shifted down: the second bend. */
-	wire(layer, ox + 10 + lean, oy + 13, ox + 26 + lean, oy + 54, C_CLIP, 8, WIRE);
+	wire(layer, ox + 11 + lean, oy + 15, ox + 29 + lean, oy + 62, C_CLIP, 9, WIRE);
 
 	/* A stub of the near limb crossing the top, which is what stops the two
 	 * stadiums reading as two separate rings.
 	 */
-	fill(layer, ox + 16 + lean, oy + 6, ox + 16 + WIRE - 1 + lean, oy + 20, C_CLIP, 1);
+	fill(layer, ox + 18 + lean, oy + 7, ox + 18 + WIRE - 1 + lean, oy + 24, C_CLIP, 1);
 
 	if (state == ZD_ICON_STATE_SAD) {
 		/* Eyes shut: two flat bars, which is legible at a glance from
 		 * across the screen in a way that a different pupil is not.
 		 */
-		fill(layer, ox + 1, oy + 19, ox + 17, oy + 22, C_PUPIL, 1);
-		fill(layer, ox + 18, oy + 21, ox + 34, oy + 24, C_PUPIL, 1);
-		brow(layer, ox + 2, oy + 8, 1);
-		brow(layer, ox + 33, oy + 10, -1);
+		fill(layer, ox + 1, oy + 24, ox + 19, oy + 27, C_PUPIL, 1);
+		fill(layer, ox + 20, oy + 26, ox + 38, oy + 29, C_PUPIL, 1);
+		brow(layer, ox + 3, oy + 12, 1);
+		brow(layer, ox + 36, oy + 14, -1);
 		return;
 	}
 
-	/* Whites. The right eye overlaps the left, as in the original -- the
-	 * two are not on the same plane.
+	/* Whites. The right eye overlaps the left, as in the original -- the two
+	 * are not on the same plane. Sat low enough that the top of the outer
+	 * loop still shows above them, which is what makes it read as a
+	 * paperclip with eyes rather than as a pair of eyes.
 	 */
-	fill(layer, ox + 1, oy + 12, ox + 18, oy + 31, C_EYE, LV_RADIUS_CIRCLE);
-	wire(layer, ox + 1, oy + 12, ox + 18, oy + 31, C_PUPIL, LV_RADIUS_CIRCLE, 2);
-	fill(layer, ox + 16, oy + 15, ox + 34, oy + 34, C_EYE, LV_RADIUS_CIRCLE);
-	wire(layer, ox + 16, oy + 15, ox + 34, oy + 34, C_PUPIL, LV_RADIUS_CIRCLE, 2);
+	fill(layer, ox + 1, oy + 16, ox + 20, oy + 38, C_EYE, LV_RADIUS_CIRCLE);
+	wire(layer, ox + 1, oy + 16, ox + 20, oy + 38, C_PUPIL, LV_RADIUS_CIRCLE, 2);
+	fill(layer, ox + 19, oy + 19, ox + 38, oy + 41, C_EYE, LV_RADIUS_CIRCLE);
+	wire(layer, ox + 19, oy + 19, ox + 38, oy + 41, C_PUPIL, LV_RADIUS_CIRCLE, 2);
 
 	if (state == ZD_ICON_STATE_BLINK) {
-		/* Lids, drawn as the eye colour over the top two thirds. Cheaper
-		 * than a second set of shapes and it cannot drift out of
-		 * alignment with the eye it belongs to.
+		/* Lids, drawn over the top two thirds of each eye. Cheaper than a
+		 * second set of shapes and they cannot drift out of alignment
+		 * with the eye they belong to.
 		 */
-		fill(layer, ox + 2, oy + 13, ox + 17, oy + 25, C_PUPIL, 3);
-		fill(layer, ox + 17, oy + 16, ox + 33, oy + 28, C_PUPIL, 3);
+		fill(layer, ox + 2, oy + 17, ox + 19, oy + 31, C_PUPIL, 3);
+		fill(layer, ox + 20, oy + 20, ox + 37, oy + 34, C_PUPIL, 3);
 	} else {
-		int32_t look = (state == ZD_ICON_STATE_BUSY) ? 3 : 0;
+		int32_t look = (state == ZD_ICON_STATE_BUSY) ? 4 : 0;
 
-		fill(layer, ox + 5 + look, oy + 17, ox + 14 + look, oy + 27, C_PUPIL,
+		fill(layer, ox + 6 + look, oy + 22, ox + 16 + look, oy + 33, C_PUPIL,
 		     LV_RADIUS_CIRCLE);
-		fill(layer, ox + 21 + look, oy + 20, ox + 30 + look, oy + 30, C_PUPIL,
+		fill(layer, ox + 24 + look, oy + 25, ox + 34 + look, oy + 36, C_PUPIL,
 		     LV_RADIUS_CIRCLE);
 	}
 
-	brow(layer, ox + 2, oy + 6, 1);
-	brow(layer, ox + 33, oy + 9, -1);
+	brow(layer, ox + 3, oy + 9, 1);
+	brow(layer, ox + 36, oy + 12, -1);
 }
 
 /** The information and warning icons, so ZD_ICON_CLIP is not a special case. */
@@ -206,11 +214,11 @@ static void draw_glyph(lv_layer_t *layer, int32_t ox, int32_t oy, const char *ch
 {
 	lv_draw_label_dsc_t dsc;
 	lv_area_t area = {
-		.x1 = ox + 2, .y1 = oy + 14, .x2 = ox + ICON_W - 2, .y2 = oy + 44
+		.x1 = ox + 2, .y1 = oy + 18, .x2 = ox + ICON_W - 2, .y2 = oy + 50
 	};
 
-	fill(layer, ox + 4, oy + 12, ox + 32, oy + 40, rgb, LV_RADIUS_CIRCLE);
-	wire(layer, ox + 4, oy + 12, ox + 32, oy + 40, C_PUPIL, LV_RADIUS_CIRCLE, 2);
+	fill(layer, ox + 5, oy + 16, ox + 35, oy + 46, rgb, LV_RADIUS_CIRCLE);
+	wire(layer, ox + 5, oy + 16, ox + 35, oy + 46, C_PUPIL, LV_RADIUS_CIRCLE, 2);
 
 	lv_draw_label_dsc_init(&dsc);
 	dsc.font = BALLOON_FONT;
@@ -218,7 +226,7 @@ static void draw_glyph(lv_layer_t *layer, int32_t ox, int32_t oy, const char *ch
 	dsc.align = LV_TEXT_ALIGN_CENTER;
 	dsc.opa = LV_OPA_COVER;
 	dsc.text = ch;
-	area.y1 += (28 - lv_font_get_line_height(BALLOON_FONT)) / 2;
+	area.y1 += (30 - lv_font_get_line_height(BALLOON_FONT)) / 2;
 	lv_draw_label(layer, &dsc, &area);
 }
 
@@ -352,7 +360,13 @@ struct zd_balloon *zd_balloon_create(lv_obj_t *parent, int16_t x, int16_t y, int
 
 	relayout(b, w, h);
 
-	lv_obj_add_event_cb(b->view, balloon_draw_cb, LV_EVENT_DRAW_POST, b);
+	/* DRAW_MAIN, not DRAW_POST. cellgrid.c uses POST because it has no
+	 * children and nothing can be covered; this widget has a label, and POST
+	 * runs after children are drawn -- so the panel was painted straight
+	 * over its own text. The first build of this drew a perfect empty
+	 * balloon.
+	 */
+	lv_obj_add_event_cb(b->view, balloon_draw_cb, LV_EVENT_DRAW_MAIN, b);
 	lv_obj_add_event_cb(b->view, view_deleted, LV_EVENT_DELETE, b);
 
 	return b;

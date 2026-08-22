@@ -306,9 +306,9 @@ static int clippy_init(zd_zapp_ctx_t ctx, const struct zd_host_api *api)
 	 * the desktop to measure something to find out what was just asked for
 	 * is the read-back trap wm.h warns about.
 	 */
-	struct zd_rect bubble_at = { 4, 4, 304, 60 };
-	struct zd_rect entry_at = { 4, 68, 300, 26 };
-	struct zd_rect answer_at = { 4, 98, 300, 106 };
+	struct zd_rect bubble_at = { 4, 4, 304, 68 };
+	struct zd_rect entry_at = { 4, 76, 300, 26 };
+	struct zd_rect answer_at = { 4, 106, 300, 98 };
 
 	host = api;
 
@@ -343,10 +343,15 @@ static int clippy_init(zd_zapp_ctx_t ctx, const struct zd_host_api *api)
 	st->mood = CLIPPY_IDLE;
 	draw_face(ctx, st);
 	api->text_set_text(ctx, st->entry, "");
-	say(ctx, st,
-	    "It looks like you're writing an RTOS.\n\n"
-	    "Ask me about Zephyr and press Enter. Answers come from the\n"
-	    "documentation index, so they cite the page they came from.");
+	say(ctx, st, "It looks like you're writing an RTOS. Need help?");
+	show_answer(ctx, st,
+		    "Ask me about Zephyr and press Enter.\n\n"
+		    "Answers come from a retrieval index built over the Zephyr\n"
+		    "documentation, so they cite the page they came from rather\n"
+		    "than inventing one.\n\n"
+		    "The model runs on CPU and takes tens of seconds. Nothing is\n"
+		    "blocked while it thinks -- drag this window about, or go and\n"
+		    "use something else, and the answer will arrive here.");
 
 	/* The animation clock. 0.7 added timers for Minesweeper; this is the
 	 * other thing they were for -- something to look at while a slow
