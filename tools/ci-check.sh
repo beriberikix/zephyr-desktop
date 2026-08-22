@@ -31,6 +31,8 @@
 #   tools/ci-check.sh                # everything, pristine builds
 #   ZD_CI_PRISTINE=0 tools/ci-check.sh   # incremental, for iterating locally
 #   ZD_CI_BOARDS=qemu tools/ci-check.sh  # just the one that can be run
+#   ZD_CI_BOARDS=net  tools/ci-check.sh  # just the networking build
+#   ZD_CI_BOARDS=clippy tools/ci-check.sh # the clippy zapp, no TCP stack
 #                                        # (qemu|cores3|rt1060|presto|all)
 #
 # Exit status is the number of failed checks, capped at 250. Every check runs
@@ -250,6 +252,67 @@ if [ "$want" = all ] || [ "$want" = qemu ]; then
 	if build_board qemu_cortex_a53 "$out/smoke" -- -DEXTRA_CONF_FILE=smoke.conf; then
 		run_qemu "smoke: no leaks, and the ABI gate still bites" "$out/smoke" \
 			'wait:30' 'expect:SMOKE: PASS'
+	fi
+fi
+
+# The clippy zapp without the TCP stack.
+#
+# CONFIG_ZD_CLIPPY defaults to following ZD_NET, and forcing it on is the whole
+# point of it being a separate knob: this configuration builds the zapp, seeds
+# it and launches it with http_request() answering -ENOSYS. Everything about
+# clippy that is not the transport -- the window, the animation, the question
+# box, the error path -- is exercised here, in a build that takes a fraction of
+# the time and cannot fail for a reason that lives in the IP stack.
+#
+# It is also the build the screenshots come from, because shot.py runs QEMU with
+# `-net none` and so could not reach a proxy from a networking build either.
+if [ "$want" = all ] || [ "$want" = clippy ]; then
+	if build_board qemu_cortex_a53 "$out/clippy" -- -DCONFIG_ZD_CLIPPY=y; then
+		# The check that matters most for clippy: its elapsed-seconds
+		# arithmetic is exactly the shape that makes GCC reach for a
+		# libgcc helper nobody wrote, and this build compiles the zapp
+		# without needing a single line of the network stack to work.
+		check_llexts "$out/clippy" 0
+
+		run_qemu "clippy is discovered without networking" "$out/clippy" 			'wait:3' 'click:20,258' 'expect:discovered 7 zapp(s)'
+	fi
+
+	# Loading it is the check that the 0.8 vtable and the manifest's
+	# abi_minor >= 8 gate agree. Nothing about that involves a socket.
+	if build_board qemu_cortex_a53 "$out/clippysmoke" 		-- -DEXTRA_CONF_FILE=smoke.conf -DCONFIG_ZD_CLIPPY=y; then
+		run_qemu "smoke: clippy loads and unloads cleanly, no network" 			"$out/clippysmoke" 'wait:30' 'expect:SMOKE: PASS'
+	fi
+fi
+
+# The networking build, and the only one that compiles the clippy zapp.
+#
+# Kept as its own configuration rather than folded into the default, because a
+# desktop that does not need the network should not carry a TCP stack -- and
+# because the default build's launcher check asserts a zapp count that clippy
+# would change. Two configurations is the honest way to have both.
+if [ "$want" = all ] || [ "$want" = net ]; then
+	if build_board qemu_cortex_a53 "$out/net" -- -DCONFIG_ZD_NET=y; then
+		# Same expectation as every other REL build: a zapp imports
+		# nothing. This is the check that matters most for clippy, whose
+		# elapsed-seconds arithmetic is exactly the shape that makes GCC
+		# reach for a libgcc helper nobody wrote.
+		check_llexts "$out/net" 0
+
+		# Seven now: the six the default build has, plus clippy, which
+		# seed.c installs only under CONFIG_ZD_NET.
+		run_qemu "clippy is discovered when networking is on" "$out/net" \
+			'wait:3' 'click:20,258' 'expect:discovered 7 zapp(s)'
+	fi
+
+	# Launching it goes through the smoke test rather than a click at guessed
+	# coordinates: smoke.conf already loads every seeded zapp and proves the
+	# handle and instance counters came back. With networking on, "every" now
+	# includes clippy, so this is the check that the 0.8 vtable and the
+	# manifest's abi_minor >= 8 gate actually agree.
+	if build_board qemu_cortex_a53 "$out/netsmoke" \
+		-- -DEXTRA_CONF_FILE=smoke.conf -DCONFIG_ZD_NET=y; then
+		run_qemu "smoke with networking: clippy loads and unloads cleanly" \
+			"$out/netsmoke" 'wait:40' 'expect:SMOKE: PASS'
 	fi
 fi
 

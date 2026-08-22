@@ -33,12 +33,32 @@
 
 LOG_MODULE_DECLARE(zd_main, CONFIG_ZD_LOG_LEVEL);
 
-/* Ticks to wait for the loop to settle after a launch or a close. Generous:
- * a close is a request, a grace period, a reap and an unload, and the point of
+/* Ticks to wait for the loop to settle after a launch. Generous: the point of
  * the test is to observe the end state rather than to race it.
  */
 #define SETTLE_TICKS 4
-#define CLOSE_TICKS  ((CONFIG_ZD_CLOSE_GRACE_MS / CONFIG_ZD_TICK_MAX_MS) + 8)
+
+/* How long to wait for closes to finish, in *milliseconds*, and that is the
+ * whole point.
+ *
+ * This used to be a tick count, (CLOSE_GRACE_MS / TICK_MAX_MS) + 8, which
+ * assumed every pass round the desktop loop sleeps the full TICK_MAX_MS. It
+ * does not. main() sleeps MIN(what lv_timer_handler asked for, TICK_MAX_MS), so
+ * any zapp with a running LVGL timer shortens every iteration -- and the close
+ * grace it is being compared against is wall clock.
+ *
+ * clippy is the first zapp with a *continuously* running one: a 400 ms
+ * animation, ticking the whole time its window is up. That pulled a fixed
+ * iteration count below the 2 s grace, and put the smoke test right on the
+ * boundary -- round 1 drained in 2.14 s and passed, round 2 in 1.84 s and
+ * reported a leak of two clients that were about to be reaped anyway. A false
+ * failure, and it would have been a false *pass* just as easily if the counters
+ * had been checked before a real leak appeared.
+ *
+ * So wait on the clock the grace is measured against. Immune to whatever timer
+ * the next zapp starts.
+ */
+#define CLOSE_WAIT_MS (CONFIG_ZD_CLOSE_GRACE_MS + 1500)
 
 enum smoke_phase {
 	SMOKE_IDLE,
@@ -66,6 +86,7 @@ static struct {
 
 	struct counters baseline;
 	enum smoke_phase phase;
+	int64_t until;      /**< wall-clock deadline; see CLOSE_WAIT_MS */
 	unsigned int round;
 	unsigned int wait;
 	unsigned int launched;
@@ -139,6 +160,13 @@ void zd_smoke_tick(void)
 		return;
 	}
 
+	if (smoke.until != 0) {
+		if (k_uptime_get() < smoke.until) {
+			return;
+		}
+		smoke.until = 0;
+	}
+
 	switch (smoke.phase) {
 	case SMOKE_LAUNCH:
 		smoke.launched = 0;
@@ -196,7 +224,7 @@ void zd_smoke_tick(void)
 		LOG_INF("SMOKE round %u: asked %u window(s) to close", smoke.round + 1,
 			request_close_all());
 		smoke.phase = SMOKE_DRAIN;
-		smoke.wait = CLOSE_TICKS;
+		smoke.until = k_uptime_get() + CLOSE_WAIT_MS;
 		break;
 
 	case SMOKE_DRAIN:

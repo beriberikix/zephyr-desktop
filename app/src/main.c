@@ -20,6 +20,7 @@
 #include "chrome/menu.h"
 #include "chrome/rowlist.h"
 #include "chrome/theme.h"
+#include "host/http_api.h"
 #include "input/keys.h"
 #include "host/session.h"
 #include "host/storage.h"
@@ -207,6 +208,12 @@ int main(void)
 		 * that is already on its way out.
 		 */
 		zd_keys_pump();
+
+		/* Beside the keys, and for exactly the same reason: an HTTP
+		 * response finished on a worker thread, and this is where it
+		 * becomes an event on the thread allowed to touch LVGL.
+		 */
+		zd_http_pump();
 
 		/* After the reaps, for the same reason the taskbar rebuild is:
 		 * it launches and closes windows, which must never happen from

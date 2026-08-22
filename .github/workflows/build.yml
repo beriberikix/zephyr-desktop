@@ -19,6 +19,14 @@ on:
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      boards:
+        description: >-
+          Which configurations to build. "all" is what a PR runs; the rest are
+          for iterating on one thing without waiting for four toolchains.
+        type: choice
+        default: all
+        options: [all, clippy, qemu, net, cores3, rt1060, presto]
 
 jobs:
   check:
@@ -61,7 +69,37 @@ jobs:
       # imports checked, and the Kconfig warnings read per board. Exit status is
       # the number of failed checks.
       - name: Build every board and run every check
+        env:
+          # Empty on push and pull_request, which ci-check.sh reads as "all".
+          ZD_CI_BOARDS: ${{ inputs.boards }}
         run: tools/ci-check.sh
+
+      # Pixels, not console text. Every other check here asserts on what the
+      # desktop *said*; a desktop that boots, logs everything expected and
+      # draws nothing would pass all of them. These are also the images
+      # docs/clippy.md refers to, so they are produced by the build rather
+      # than pasted in from someone's laptop and never updated again.
+      #
+      # The derivation of where to click lives in the script, not here --
+      # anything expressible only in YAML is glue, not a check.
+      - name: Screenshot the desktop and clippy
+        if: always()
+        run: |
+          for d in build-ci/clippy build-ci/net; do
+            if [ -f "$d/zephyr/zephyr.elf" ]; then
+              tools/shot-clippy.sh -d "$d" -o build-ci/shots                 || echo "shot-clippy exited $? (screenshots are not a gate)"
+              exit 0
+            fi
+          done
+          echo "no build with clippy in it; skipping the screenshots"
+
+      - name: Keep the screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: build-ci/shots/*
+          if-no-files-found: warn
 
       - name: Keep the build logs, whatever happened
         if: always()

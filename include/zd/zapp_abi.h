@@ -49,7 +49,7 @@ extern "C" {
  * here works today. See docs/abi.md for the table.
  */
 #define ZD_ABI_MAJOR 0
-#define ZD_ABI_MINOR 7
+#define ZD_ABI_MINOR 9
 
 /**
  * Longest absolute path the desktop will hand back or accept.
@@ -130,6 +130,8 @@ typedef struct zd_menu *zd_menu_t;
 typedef struct zd_list *zd_list_t;
 /** A rectangular sheet of small, individually drawn cells. Added in 0.7. */
 typedef struct zd_grid *zd_grid_t;
+/** An assistant balloon: a stock picture and a coloured panel. 0.9. */
+typedef struct zd_balloon *zd_balloon_t;
 /** An open file. */
 typedef struct zd_file *zd_file_t;
 /**
@@ -475,6 +477,26 @@ enum zd_event_type {
 	 * measure elapsed time; use this to know when to look.
 	 */
 	ZD_EV_TIMER,
+	/**
+	 * An http_request() you started has finished; ev->http.id is the value
+	 * it returned. Added in 0.8.
+	 *
+	 * ev->win is NULL, for the same reason ZD_EV_TIMER's is: a request
+	 * belongs to your instance, not to a window, and the desktop has no
+	 * business guessing which of your windows asked. Check the type before
+	 * the usual `ev->win != mine` guard.
+	 *
+	 * ev->http.status is the HTTP status, or a negative errno if the
+	 * request never got that far -- no route, no answer, or a body larger
+	 * than the desktop was willing to hold. ev->http.len is how many bytes
+	 * are readable with http_read().
+	 *
+	 * The body is NOT in the event. It lives in a desktop-owned buffer
+	 * until you call http_release(), which keeps struct zd_event a fixed
+	 * small thing and keeps a zapp from holding a pointer into desktop
+	 * memory across a dispatch it does not control.
+	 */
+	ZD_EV_HTTP_RESPONSE,
 };
 
 struct zd_event {
@@ -533,6 +555,12 @@ struct zd_event {
 		struct {
 			uint16_t id;
 		} timer;
+		/** ZD_EV_HTTP_RESPONSE. Added in 0.8. */
+		struct {
+			uint16_t id;     /**< what http_request() returned */
+			int16_t status;  /**< HTTP status, or negative errno */
+			uint32_t len;    /**< bytes available to http_read() */
+		} http;
 	};
 };
 
@@ -570,6 +598,11 @@ _Static_assert(offsetof(struct zd_event, click) == offsetof(struct zd_event, gri
 		       offsetof(struct zd_event, click) ==
 			       offsetof(struct zd_event, timer),
 	       "the zd_event union moved when the 0.7 members were added");
+/* 0.8's member is the widest yet (uint32_t after two 16-bit fields), which is
+ * still narrower than the pointer the union is already aligned to. Asserted
+ * rather than reasoned about, same as 0.6 and 0.7. */
+_Static_assert(offsetof(struct zd_event, click) == offsetof(struct zd_event, http),
+	       "the 0.8 http member is not at the union's offset");
 
 struct zd_window_desc {
 	const char *title;
@@ -596,6 +629,43 @@ struct zd_window_desc {
  * Grows by appending only. Check struct_size before using a field added after
  * the minor version you were built against.
  */
+/**
+ * A picture the desktop draws, named by a zapp that cannot draw one.
+ *
+ * This is the ABI's answer to "how do I show an image", and the answer is that
+ * you do not -- you name one from a fixed set and the desktop owns the artwork.
+ *
+ * That is a real limitation and it is chosen. An image call would need a pixel
+ * format, a decoder, somewhere for the pixels to live and a way for a zapp with
+ * no libc to produce them; a stock icon needs a number. It is also exactly the
+ * bargain a Win95 message box strikes -- MB_ICONINFORMATION names a picture, it
+ * does not carry one -- so the desktop drawing its own icons is period-correct
+ * as well as cheap.
+ *
+ * The set is small and will grow slowly, on the end, like everything else here.
+ */
+enum zd_icon {
+	ZD_ICON_NONE = 0, /**< panel only, no picture */
+	ZD_ICON_CLIP = 1, /**< a paperclip with eyes */
+	ZD_ICON_INFO = 2,
+	ZD_ICON_WARN = 3,
+};
+
+/**
+ * An icon's expression.
+ *
+ * Only ZD_ICON_CLIP has more than one; the rest ignore it. A state rather than
+ * a frame index, so a caller animating one never has to know how many frames a
+ * mood has -- the same reasoning grid_measure() uses to keep cell sizes out of
+ * zapps.
+ */
+enum zd_icon_state {
+	ZD_ICON_STATE_NORMAL = 0,
+	ZD_ICON_STATE_BLINK = 1,
+	ZD_ICON_STATE_BUSY = 2, /**< leaning, eyes to one side */
+	ZD_ICON_STATE_SAD = 3,  /**< eyes shut */
+};
+
 struct zd_host_api {
 	uint16_t abi_major;
 	uint16_t abi_minor;
@@ -1247,6 +1317,99 @@ struct zd_host_api {
 	int (*timer_start)(zd_zapp_ctx_t ctx, uint32_t period_ms, uint16_t id);
 	/** Stop it. Stopping one that is not running is not an error. */
 	int (*timer_stop)(zd_zapp_ctx_t ctx, uint16_t id);
+
+	/*
+	 * Network, added in 0.8. The first thing in this ABI that does not
+	 * complete on the calling thread.
+	 *
+	 * Everything before this returns when it is done. A network request
+	 * does not: the desktop's own assistant Space answers in tens of
+	 * seconds, and a zapp runs as a callback inside the frame loop, so a
+	 * call that waited would stop the clock, the taskbar and every other
+	 * window for the duration. So this hands the work to a desktop worker
+	 * thread and returns immediately; the answer arrives later as
+	 * ZD_EV_HTTP_RESPONSE, drained from the loop like a keystroke.
+	 *
+	 * That is the same shape input/keys.c uses, and for the same reason:
+	 * work that finishes off the desktop thread may not touch LVGL, so it
+	 * goes on a queue and the loop picks it up.
+	 */
+
+	/**
+	 * Start a request. Returns immediately.
+	 *
+	 * @param url    absolute http:// URL. Not https:// -- the desktop has
+	 *               no TLS stack, and pretending otherwise by silently
+	 *               downgrading would be worse than refusing.
+	 * @param body   request body, or NULL for a GET.
+	 * @param out_id set to the id this request will report in
+	 *               ev->http.id.
+	 * @return 0, -EBUSY if no request slot is free, -EINVAL for a
+	 *         malformed or non-http URL, or -ENOSYS if the build has no
+	 *         networking.
+	 */
+	int (*http_request)(zd_zapp_ctx_t ctx, const char *url, const char *body,
+			    uint16_t *out_id);
+	/**
+	 * Copy part of a completed response body out.
+	 *
+	 * Valid only between ZD_EV_HTTP_RESPONSE and http_release() for that
+	 * id. Reading a released or unknown id gives -EINVAL rather than
+	 * whatever happens to be in the buffer.
+	 *
+	 * @return bytes written, or negative errno. The copy is always
+	 *         NUL-terminated when @a cap is at least 1.
+	 */
+	int (*http_read)(zd_zapp_ctx_t ctx, uint16_t id, uint32_t from, char *buf,
+			 uint32_t cap);
+	/**
+	 * Let the desktop reuse the buffer and the slot.
+	 *
+	 * Not calling this leaks a slot until your instance exits, at which
+	 * point the desktop reclaims everything you were holding -- the same
+	 * bargain as every other handle here.
+	 */
+	void (*http_release)(zd_zapp_ctx_t ctx, uint16_t id);
+
+	/* --- ABI 0.9: assistant balloons ------------------------------------ */
+
+	/*
+	 * The first widget in this ABI that is a picture rather than a control.
+	 *
+	 * Everything before it is grey chrome with text in it, which was enough
+	 * for a text editor, a file browser and a game -- and not enough for an
+	 * assistant, which is the one kind of program whose whole point is that
+	 * it looks like something. A zapp cannot draw: it has no framebuffer, no
+	 * lv_obj_t and, with LLEXT_EXPORT_DEFAULT_GROUPS=n, not one LVGL symbol
+	 * to link against. So the desktop draws, and the zapp says what.
+	 *
+	 * A balloon is a coloured panel with wrapped text and an optional stock
+	 * icon beside it. Nothing about it is specific to the assistant that
+	 * asked for it: a warning balloon over a form field, or a hint in the
+	 * corner of a game, is the same widget with a different icon.
+	 */
+
+	/**
+	 * @param icon one of enum zd_icon. The icon is drawn to the LEFT of the
+	 *             panel and inside the given rectangle, so @p w must allow
+	 *             for it; below a certain height it is dropped and the panel
+	 *             takes the whole width.
+	 * @return NULL if the balloon table is full.
+	 */
+	zd_balloon_t (*balloon_create)(zd_zapp_ctx_t ctx, zd_window_t win, int16_t x,
+				       int16_t y, int16_t w, int16_t h, uint32_t icon);
+	void (*balloon_destroy)(zd_zapp_ctx_t ctx, zd_balloon_t balloon);
+	/** Replace the text. Wrapped by the desktop; newlines are honoured. */
+	int (*balloon_set_text)(zd_zapp_ctx_t ctx, zd_balloon_t balloon, const char *text);
+	int (*balloon_set_geometry)(zd_zapp_ctx_t ctx, zd_balloon_t balloon, int16_t x,
+				    int16_t y, int16_t w, int16_t h);
+	/**
+	 * @param icon  enum zd_icon.
+	 * @param state enum zd_icon_state. Setting the pair it already has is
+	 *              free, so an animation may call this every frame.
+	 */
+	int (*balloon_set_icon)(zd_zapp_ctx_t ctx, zd_balloon_t balloon, uint32_t icon,
+				uint32_t state);
 };
 
 /* --- the zapp's side ------------------------------------------------------- */

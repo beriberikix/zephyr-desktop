@@ -25,6 +25,7 @@ SPDX-License-Identifier: Apache-2.0
 import argparse
 import json
 import os
+import shutil
 import socket
 import struct
 import subprocess
@@ -32,9 +33,50 @@ import sys
 import time
 import zlib
 
-SDK = os.environ.get("ZEPHYR_SDK_INSTALL_DIR", os.path.expanduser("~/zephyr-sdk-1.0.1"))
-QEMU = os.environ.get("QEMU", f"{SDK}/hosttools/usr/bin/qemu-system-aarch64")
 ABS_MAX = 32767  # virtio-tablet reports absolute axes over this range
+
+
+def find_qemu(build):
+    """The qemu `west build -t run` would use, asked for rather than guessed.
+
+    This used to be $ZEPHYR_SDK_INSTALL_DIR/hosttools/usr/bin/qemu-system-aarch64
+    with a fallback guess of ~/zephyr-sdk-<version>. Both are wrong on a CI
+    runner: the variable is not set there, and the SDK lives wherever the setup
+    action cached it. The guess failed with a FileNotFoundError naming a path
+    that had never existed on that machine.
+
+    The build already knows. CMake recorded it in CMakeCache.txt when it
+    produced the image being shot, so that entry is the emulator matching these
+    artifacts -- which is the same reasoning tools/ci-check.sh uses to find nm.
+    """
+    override = os.environ.get("QEMU")
+    if override:
+        return override
+
+    cache = os.path.join(build, "CMakeCache.txt")
+    try:
+        with open(cache, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                # "QEMU" is the entry ci-check.sh already reads successfully;
+                # the others are there because an SDK installed without
+                # hosttools records QEMU-NOTFOUND and some Zephyr revisions
+                # spell it differently.
+                for key in ("QEMU:", "QEMU_BINARY_PATH:", "CMAKE_QEMU:"):
+                    if line.startswith(key):
+                        value = line.split("=", 1)[1].strip()
+                        if value and os.path.exists(value):
+                            return value
+    except OSError:
+        pass
+
+    found = shutil.which("qemu-system-aarch64")
+    if found:
+        return found
+
+    raise SystemExit(
+        "could not find qemu-system-aarch64.\n"
+        f"  looked in {cache} (QEMU_BINARY_PATH, CMAKE_QEMU) and on $PATH.\n"
+        "  set $QEMU to override.")
 
 
 class Qmp:
@@ -149,8 +191,9 @@ def main():
         actions = [("shot", "frame")]
 
     os.makedirs(args.out, exist_ok=True)
+    qemu = find_qemu(args.build)
     proc = subprocess.Popen([
-        QEMU, "-cpu", "cortex-a53",
+        qemu, "-cpu", "cortex-a53",
         "-device", "virtio-tablet-device,bus=virtio-mmio-bus.3",
         "-machine", "virt,secure=on,gic-version=3",
         "-global", "virtio-mmio.force-legacy=false",

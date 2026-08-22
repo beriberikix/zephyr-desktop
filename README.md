@@ -57,6 +57,26 @@ symbol where Zephyr's defaults would export 172. Apps get opaque,
 generation-counted handles validated against their owner and never touch LVGL,
 so the permission shim is the only linkable route to the filesystem.
 
+**One app waits on a language model without stopping the desktop.** Clippy asks
+a Hugging Face Space about Zephyr; the Space runs its model on CPU and takes
+tens of seconds. Everything in the ABI before it finished before it returned,
+which is fine until a callback on the drawing thread wants an answer from the
+internet. ABI 0.8 adds a request that returns immediately and an event that
+arrives later, on the same queue keystrokes use — so the clock keeps ticking and
+the other windows keep dragging while a paperclip thinks.
+
+![Clippy open on the desktop](docs/images/clippy.png)
+
+The paperclip is drawn by the desktop, not shipped by the app: ABI 0.9 lets a
+zapp *name* a stock picture rather than carry one, which is the bargain a Win95
+message box already struck with `MB_ICONINFORMATION`. A zapp has no framebuffer,
+no `lv_obj_t` and not one LVGL symbol to link against, so drawing is the
+desktop's job by construction.
+
+CI builds the zapp, checks it imports nothing, launches it, unloads it and takes
+that screenshot on every run. See [docs/clippy.md](docs/clippy.md) — including
+the bugs it found on the way in, none of which were in Clippy.
+
 **Nothing is destroyed during dispatch.** An app closing its own window is
 running on a stack frame inside code that unloading would free. Every destroy is
 queued and drained from the main loop. It is the rule the whole design bends
@@ -73,6 +93,12 @@ around, and [docs/architecture.md](docs/architecture.md) explains why.
   snapping, no notifications, no sound, no theming engine, one hardcoded palette.
 - **The clock is a fiction** on boards with no RTC, and there is no date in the
   ABI at all.
+- **Networking is off by default and has no TLS.** `CONFIG_ZD_NET=y` adds the
+  0.8 HTTP calls; `http_request()` refuses `https://` rather than downgrading
+  it, because a desktop with no trust store should not pretend otherwise. The
+  Clippy app reaches its Space through `tools/hf-proxy.py` on the development
+  host, which terminates TLS there. `CONFIG_ZD_CLIPPY=y` builds the app without
+  the TCP stack, which is how its UI gets worked on.
 
 Also: Zephyr is pinned to a `main` commit rather than a release, because the
 QEMU display and pointer stack this needs is in no release tag yet; and
@@ -99,6 +125,7 @@ reproduce the CoreS3's screen geometry under QEMU when you do not have one.
 | [docs/abi.md](docs/abi.md) | The app ABI: versioning, handles, ordering, what it refuses to promise |
 | [docs/architecture.md](docs/architecture.md) | How the desktop works inside |
 | [docs/hardware.md](docs/hardware.md) | Board runbooks and porting |
+| [docs/clippy.md](docs/clippy.md) | Asking a model from a zapp: the 0.8 network ABI, and why TLS is the proxy's job |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Building, testing, and the rules that are easy to get wrong |
 | [CHANGELOG.md](CHANGELOG.md) | What changed per release |
 | [docs/history.md](docs/history.md) | How it was built, and what the plan got wrong. Not required reading. |
