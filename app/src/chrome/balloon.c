@@ -37,10 +37,14 @@ LOG_MODULE_DECLARE(zd_main, CONFIG_ZD_LOG_LEVEL);
 #define ICON_H 64
 #define ICON_GAP 4
 
-/* Wire thickness of the paperclip. Three is too thin to see the loop; five
- * closes the gap between the two loops at this size.
+/* Wire thickness of the paperclip.
+ *
+ * Four, and the number is load-bearing. At five, a 24-pixel-wide loop has a
+ * 14-pixel interior with fully rounded ends, and the rounding eats it: the
+ * first version drew a solid periwinkle blob rather than a wire. The loop has
+ * to stay at least three times the wire thickness across.
  */
-#define WIRE 5
+#define WIRE 4
 
 /* Office-assistant yellow. Not in theme.h with the system palette on purpose:
  * that palette is the Win95 *system* one, every entry of which is a real
@@ -134,10 +138,10 @@ static void wire(lv_layer_t *layer, int32_t x1, int32_t y1, int32_t x2, int32_t 
 static void brow(lv_layer_t *layer, int32_t x, int32_t y, int32_t dir)
 {
 	for (int32_t i = 0; i < 3; i++) {
-		int32_t sx = x + dir * i * 6;
-		int32_t sy = y + i * 2;
+		int32_t sx = x + dir * i * 4;
+		int32_t sy = y + i;
 
-		fill(layer, MIN(sx, sx + dir * 6), sy, MAX(sx, sx + dir * 6), sy + 2,
+		fill(layer, MIN(sx, sx + dir * 4), sy, MAX(sx, sx + dir * 4), sy + 1,
 		     C_PUPIL, 1);
 	}
 }
@@ -154,58 +158,61 @@ static void draw_clip(lv_layer_t *layer, int32_t ox, int32_t oy, uint32_t state)
 {
 	int32_t lean = (state == ZD_ICON_STATE_BUSY) ? 2 : 0;
 
-	/* Outer loop, opening downward. Drawn first so the inner one and the
-	 * eyes sit over it.
+	/* Outer loop, opening downward. Narrow and tall: a paperclip is about
+	 * two and a half times as tall as it is wide, and drawing it squarer
+	 * makes it read as a ring.
 	 */
-	wire(layer, ox + 3 + lean, oy + 2, ox + 33 + lean, oy + 48, C_CLIP_DARK, 15, WIRE);
+	wire(layer, ox + 8 + lean, oy + 2, ox + 32 + lean, oy + 46, C_CLIP_DARK, 12, WIRE);
 
-	/* Inner loop, opening upward and shifted down: the second bend. */
-	wire(layer, ox + 11 + lean, oy + 15, ox + 29 + lean, oy + 62, C_CLIP, 9, WIRE);
-
-	/* A stub of the near limb crossing the top, which is what stops the two
-	 * stadiums reading as two separate rings.
+	/* Inner loop, opening upward and shifted down: the second bend, and the
+	 * part that shows below the eyes.
 	 */
-	fill(layer, ox + 18 + lean, oy + 7, ox + 18 + WIRE - 1 + lean, oy + 24, C_CLIP, 1);
+	wire(layer, ox + 14 + lean, oy + 14, ox + 26 + lean, oy + 61, C_CLIP, 6, WIRE);
+
+	/* The near limb continuing down between the two loops. Without it the
+	 * pair reads as two rings that happen to overlap.
+	 */
+	fill(layer, ox + 19 + lean, oy + 30, ox + 19 + WIRE - 1 + lean, oy + 50, C_CLIP,
+	     1);
 
 	if (state == ZD_ICON_STATE_SAD) {
-		/* Eyes shut: two flat bars, which is legible at a glance from
-		 * across the screen in a way that a different pupil is not.
+		/* Eyes shut: two flat bars, legible at a glance from across the
+		 * screen in a way a different pupil is not.
 		 */
-		fill(layer, ox + 1, oy + 24, ox + 19, oy + 27, C_PUPIL, 1);
-		fill(layer, ox + 20, oy + 26, ox + 38, oy + 29, C_PUPIL, 1);
-		brow(layer, ox + 3, oy + 12, 1);
-		brow(layer, ox + 36, oy + 14, -1);
+		fill(layer, ox + 4, oy + 20, ox + 19, oy + 23, C_PUPIL, 1);
+		fill(layer, ox + 18, oy + 23, ox + 33, oy + 26, C_PUPIL, 1);
+		brow(layer, ox + 5, oy + 11, 1);
+		brow(layer, ox + 32, oy + 14, -1);
 		return;
 	}
 
-	/* Whites. The right eye overlaps the left, as in the original -- the two
-	 * are not on the same plane. Sat low enough that the top of the outer
-	 * loop still shows above them, which is what makes it read as a
-	 * paperclip with eyes rather than as a pair of eyes.
+	/* Whites, sized so the top arc of the outer loop still shows above them
+	 * and the bottom of the inner loop below. The right eye overlaps the
+	 * left, as in the original -- the two are not on the same plane.
 	 */
-	fill(layer, ox + 1, oy + 16, ox + 20, oy + 38, C_EYE, LV_RADIUS_CIRCLE);
-	wire(layer, ox + 1, oy + 16, ox + 20, oy + 38, C_PUPIL, LV_RADIUS_CIRCLE, 2);
-	fill(layer, ox + 19, oy + 19, ox + 38, oy + 41, C_EYE, LV_RADIUS_CIRCLE);
-	wire(layer, ox + 19, oy + 19, ox + 38, oy + 41, C_PUPIL, LV_RADIUS_CIRCLE, 2);
+	fill(layer, ox + 4, oy + 13, ox + 19, oy + 29, C_EYE, LV_RADIUS_CIRCLE);
+	wire(layer, ox + 4, oy + 13, ox + 19, oy + 29, C_PUPIL, LV_RADIUS_CIRCLE, 2);
+	fill(layer, ox + 18, oy + 16, ox + 33, oy + 32, C_EYE, LV_RADIUS_CIRCLE);
+	wire(layer, ox + 18, oy + 16, ox + 33, oy + 32, C_PUPIL, LV_RADIUS_CIRCLE, 2);
 
 	if (state == ZD_ICON_STATE_BLINK) {
-		/* Lids, drawn over the top two thirds of each eye. Cheaper than a
-		 * second set of shapes and they cannot drift out of alignment
-		 * with the eye they belong to.
+		/* Lids over the top two thirds of each eye. Cheaper than a second
+		 * set of shapes, and they cannot drift out of alignment with the
+		 * eye they belong to.
 		 */
-		fill(layer, ox + 2, oy + 17, ox + 19, oy + 31, C_PUPIL, 3);
-		fill(layer, ox + 20, oy + 20, ox + 37, oy + 34, C_PUPIL, 3);
+		fill(layer, ox + 5, oy + 14, ox + 18, oy + 24, C_PUPIL, 3);
+		fill(layer, ox + 19, oy + 17, ox + 32, oy + 27, C_PUPIL, 3);
 	} else {
-		int32_t look = (state == ZD_ICON_STATE_BUSY) ? 4 : 0;
+		int32_t look = (state == ZD_ICON_STATE_BUSY) ? 3 : 0;
 
-		fill(layer, ox + 6 + look, oy + 22, ox + 16 + look, oy + 33, C_PUPIL,
+		fill(layer, ox + 8 + look, oy + 17, ox + 15 + look, oy + 25, C_PUPIL,
 		     LV_RADIUS_CIRCLE);
-		fill(layer, ox + 24 + look, oy + 25, ox + 34 + look, oy + 36, C_PUPIL,
+		fill(layer, ox + 22 + look, oy + 20, ox + 29 + look, oy + 28, C_PUPIL,
 		     LV_RADIUS_CIRCLE);
 	}
 
-	brow(layer, ox + 3, oy + 9, 1);
-	brow(layer, ox + 36, oy + 12, -1);
+	brow(layer, ox + 5, oy + 8, 1);
+	brow(layer, ox + 32, oy + 11, -1);
 }
 
 /** The information and warning icons, so ZD_ICON_CLIP is not a special case. */
