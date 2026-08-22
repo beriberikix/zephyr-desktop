@@ -1,5 +1,5 @@
 /*
- * clippy — "It looks like you're need help with Zephyr."
+ * clippy — "It looks like you're getting started with Zephyr."
  *
  * Asks a Hugging Face Space a question about Zephyr and shows the answer. It
  * is the first zapp that waits on something the desktop does not control, and
