@@ -49,7 +49,7 @@ extern "C" {
  * here works today. See docs/abi.md for the table.
  */
 #define ZD_ABI_MAJOR 0
-#define ZD_ABI_MINOR 8
+#define ZD_ABI_MINOR 9
 
 /**
  * Longest absolute path the desktop will hand back or accept.
@@ -130,6 +130,8 @@ typedef struct zd_menu *zd_menu_t;
 typedef struct zd_list *zd_list_t;
 /** A rectangular sheet of small, individually drawn cells. Added in 0.7. */
 typedef struct zd_grid *zd_grid_t;
+/** An assistant balloon: a stock picture and a coloured panel. 0.9. */
+typedef struct zd_balloon *zd_balloon_t;
 /** An open file. */
 typedef struct zd_file *zd_file_t;
 /**
@@ -627,6 +629,43 @@ struct zd_window_desc {
  * Grows by appending only. Check struct_size before using a field added after
  * the minor version you were built against.
  */
+/**
+ * A picture the desktop draws, named by a zapp that cannot draw one.
+ *
+ * This is the ABI's answer to "how do I show an image", and the answer is that
+ * you do not -- you name one from a fixed set and the desktop owns the artwork.
+ *
+ * That is a real limitation and it is chosen. An image call would need a pixel
+ * format, a decoder, somewhere for the pixels to live and a way for a zapp with
+ * no libc to produce them; a stock icon needs a number. It is also exactly the
+ * bargain a Win95 message box strikes -- MB_ICONINFORMATION names a picture, it
+ * does not carry one -- so the desktop drawing its own icons is period-correct
+ * as well as cheap.
+ *
+ * The set is small and will grow slowly, on the end, like everything else here.
+ */
+enum zd_icon {
+	ZD_ICON_NONE = 0, /**< panel only, no picture */
+	ZD_ICON_CLIP = 1, /**< a paperclip with eyes */
+	ZD_ICON_INFO = 2,
+	ZD_ICON_WARN = 3,
+};
+
+/**
+ * An icon's expression.
+ *
+ * Only ZD_ICON_CLIP has more than one; the rest ignore it. A state rather than
+ * a frame index, so a caller animating one never has to know how many frames a
+ * mood has -- the same reasoning grid_measure() uses to keep cell sizes out of
+ * zapps.
+ */
+enum zd_icon_state {
+	ZD_ICON_STATE_NORMAL = 0,
+	ZD_ICON_STATE_BLINK = 1,
+	ZD_ICON_STATE_BUSY = 2, /**< leaning, eyes to one side */
+	ZD_ICON_STATE_SAD = 3,  /**< eyes shut */
+};
+
 struct zd_host_api {
 	uint16_t abi_major;
 	uint16_t abi_minor;
@@ -1331,6 +1370,46 @@ struct zd_host_api {
 	 * bargain as every other handle here.
 	 */
 	void (*http_release)(zd_zapp_ctx_t ctx, uint16_t id);
+
+	/* --- ABI 0.9: assistant balloons ------------------------------------ */
+
+	/*
+	 * The first widget in this ABI that is a picture rather than a control.
+	 *
+	 * Everything before it is grey chrome with text in it, which was enough
+	 * for a text editor, a file browser and a game -- and not enough for an
+	 * assistant, which is the one kind of program whose whole point is that
+	 * it looks like something. A zapp cannot draw: it has no framebuffer, no
+	 * lv_obj_t and, with LLEXT_EXPORT_DEFAULT_GROUPS=n, not one LVGL symbol
+	 * to link against. So the desktop draws, and the zapp says what.
+	 *
+	 * A balloon is a coloured panel with wrapped text and an optional stock
+	 * icon beside it. Nothing about it is specific to the assistant that
+	 * asked for it: a warning balloon over a form field, or a hint in the
+	 * corner of a game, is the same widget with a different icon.
+	 */
+
+	/**
+	 * @param icon one of enum zd_icon. The icon is drawn to the LEFT of the
+	 *             panel and inside the given rectangle, so @p w must allow
+	 *             for it; below a certain height it is dropped and the panel
+	 *             takes the whole width.
+	 * @return NULL if the balloon table is full.
+	 */
+	zd_balloon_t (*balloon_create)(zd_zapp_ctx_t ctx, zd_window_t win, int16_t x,
+				       int16_t y, int16_t w, int16_t h, uint32_t icon);
+	void (*balloon_destroy)(zd_zapp_ctx_t ctx, zd_balloon_t balloon);
+	/** Replace the text. Wrapped by the desktop; newlines are honoured. */
+	int (*balloon_set_text)(zd_zapp_ctx_t ctx, zd_balloon_t balloon, const char *text);
+	int (*balloon_set_geometry)(zd_zapp_ctx_t ctx, zd_balloon_t balloon, int16_t x,
+				    int16_t y, int16_t w, int16_t h);
+	/**
+	 * @param icon  enum zd_icon.
+	 * @param state enum zd_icon_state. Setting the pair it already has is
+	 *              free, so an animation may call this every frame.
+	 */
+	int (*balloon_set_icon)(zd_zapp_ctx_t ctx, zd_balloon_t balloon, uint32_t icon,
+				uint32_t state);
 };
 
 /* --- the zapp's side ------------------------------------------------------- */

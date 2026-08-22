@@ -124,6 +124,7 @@ target_sources(app PRIVATE
   src/chrome/titlebar.c
   src/chrome/menu.c
   src/chrome/rowlist.c
+  src/chrome/balloon.c
   src/chrome/cellgrid.c
   src/shell/desktop.c
   src/shell/taskbar.c
@@ -135,6 +136,7 @@ target_sources(app PRIVATE
   src/host/fs_shim.c
   src/host/fs_api.c
   src/host/host_api.c
+  src/host/balloon_api.c
   src/host/grid_api.c
   src/host/list_api.c
   src/host/text_api.c
@@ -205,9 +207,11 @@ endif()
 set(ZD_hello_SOURCES  ${ZD_ZAPPS}/hello/hello.c)
 set(ZD_notes_SOURCES  ${ZD_ZAPPS}/notes/notes.c ${ZD_ZAPPS}/lib/zapplib.c)
 set(ZD_badabi_SOURCES ${ZD_ZAPPS}/badabi/badabi.c)
+# One file again. The paperclip used to be five frames of ASCII art in face.c;
+# ABI 0.9 made it a stock icon the desktop draws, so the art moved to
+# app/src/chrome/balloon.c and the zapp names it with a number.
 set(ZD_clippy_SOURCES
   ${ZD_ZAPPS}/clippy/clippy.c
-  ${ZD_ZAPPS}/clippy/face.c
   ${ZD_ZAPPS}/lib/zapplib.c
 )
 set(ZD_notepad_SOURCES

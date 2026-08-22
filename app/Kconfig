@@ -150,6 +150,14 @@ config ZD_MAX_GRIDS
 	  A game with a board and a face button is two; two games at once are
 	  four. Fixed array, for the reason windows, lists and open files are.
 
+config ZD_MAX_BALLOONS
+	int "Maximum simultaneously live assistant balloons, desktop-wide"
+	default 4
+	help
+	  Two per assistant window is the shape that exists today -- one for the
+	  assistant and one spare -- and two assistants at once are four. Fixed
+	  array, for the reason windows, lists, grids and open files are.
+
 config ZD_GRID_CELLS_TOTAL
 	int "Cells shared between every live grid"
 	default 768
