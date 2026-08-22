@@ -24,6 +24,7 @@
 #include "session.h"
 #include "list_api.h"
 #include "text_api.h"
+#include "http_api.h"
 #include "timer_api.h"
 #include "../chrome/cellgrid.h"
 #include "../chrome/menu.h"
@@ -988,6 +989,33 @@ static int api_timer_stop(zd_zapp_ctx_t ctx, uint16_t id)
 	return inst != NULL ? zd_timer_stop(inst, id) : -EINVAL;
 }
 
+/* --- network ------------------------------------------------------------------ */
+
+static int api_http_request(zd_zapp_ctx_t ctx, const char *url, const char *body,
+			    uint16_t *out_id)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_http_request(inst, url, body, out_id) : -EINVAL;
+}
+
+static int api_http_read(zd_zapp_ctx_t ctx, uint16_t id, uint32_t from, char *buf,
+			 uint32_t cap)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_http_read(inst, id, from, buf, cap) : -EINVAL;
+}
+
+static void api_http_release(zd_zapp_ctx_t ctx, uint16_t id)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	if (inst != NULL) {
+		zd_http_release(inst, id);
+	}
+}
+
 /* --- the tables ------------------------------------------------------------- */
 
 #define ZD_HOST_API_COMMON                                                                 \
@@ -1039,7 +1067,8 @@ static int api_timer_stop(zd_zapp_ctx_t ctx, uint16_t id)
 	.grid_measure = api_grid_measure, .grid_fit = api_grid_fit,                        \
 	.grid_get_capacity = api_grid_get_capacity, .grid_set_cell = api_grid_set_cell,    \
 	.grid_clear = api_grid_clear, .timer_start = api_timer_start,                      \
-	.timer_stop = api_timer_stop
+	.timer_stop = api_timer_stop, .http_request = api_http_request,                    \
+	.http_read = api_http_read, .http_release = api_http_release
 
 static const struct zd_host_api host_api_untrusted = {
 	ZD_HOST_API_COMMON,

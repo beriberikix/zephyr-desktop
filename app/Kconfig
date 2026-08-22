@@ -176,6 +176,90 @@ config ZD_GRID_MAX_CELLS
 
 	  A zapp must never read this symbol directly; see CLAUDE.md.
 
+config ZD_NET
+	bool "Networking for zapps (ABI 0.8 http_request)"
+	select NETWORKING
+	select NET_IPV4
+	select NET_TCP
+	select NET_SOCKETS
+	select NET_SOCKETS_POSIX_NAMES if !POSIX_API
+	select DNS_RESOLVER
+	select NET_DHCPV4
+	# The IP stack needs sys_rand_get() for ephemeral ports, the TCP initial
+	# sequence number and DHCP backoff. qemu_cortex_a53 has no entropy
+	# device, so without this the link fails on undefined z_impl_sys_rand_get
+	# rather than on anything in this file.
+	#
+	# Not a CSPRNG, and it does not need to be: nothing here is
+	# cryptographic, because there is deliberately no TLS. A board that grows
+	# one should select a real entropy source at the same time.
+	select TEST_RANDOM_GENERATOR
+	help
+	  Adds the 0.8 http_request/http_read/http_release calls and the
+	  ZD_EV_HTTP_RESPONSE event.
+
+	  Plain HTTP only. There is deliberately no TLS: the desktop would need
+	  mbedTLS and a trust store to talk to anything on the public internet,
+	  which is a lot of flash and a lot of expiry management for a demo.
+	  The clippy zapp reaches its Hugging Face Space through tools/hf-proxy.py
+	  on the development host, which terminates TLS there. See docs/clippy.md.
+
+	  Off by default. A desktop that does not need the network should not
+	  carry a TCP stack.
+
+config ZD_CLIPPY
+	bool "Build and seed the clippy zapp"
+	default y if ZD_NET
+	help
+	  Normally follows ZD_NET, because an assistant that cannot make a
+	  request is not worth the flash.
+
+	  It is a separate knob so it can be forced on *without* the TCP stack,
+	  which is how the zapp's own UI gets worked on and screenshotted. With
+	  networking off, http_request() answers -ENOSYS and clippy shows that as
+	  its error state -- the window, the paperclip, the animation and the
+	  question box are all exactly what they are on a networking build. It
+	  builds in a fraction of the time and cannot fail for a reason that
+	  lives in the IP stack.
+
+	  Forcing it on is a build-time choice, so it is spelled out on the
+	  command line rather than defaulted anywhere:
+
+	    west build -b qemu_cortex_a53 app -- -DCONFIG_ZD_CLIPPY=y
+
+config ZD_HTTP_MAX_REQUESTS
+	int "Concurrent zapp HTTP requests"
+	depends on ZD_NET
+	default 2
+	range 1 8
+	help
+	  Each slot holds a whole response body, so this multiplies
+	  ZD_HTTP_BODY_MAX. Two is enough for one zapp asking a question while
+	  another is still waiting.
+
+config ZD_HTTP_BODY_MAX
+	int "Largest response body, bytes"
+	depends on ZD_NET
+	default 8192
+	help
+	  Responses longer than this are truncated. The buffer is statically
+	  allocated per slot, so this is real RAM whether or not anything uses
+	  the network.
+
+config ZD_HTTP_TIMEOUT_S
+	int "Seconds to wait for a response"
+	depends on ZD_NET
+	default 120
+	help
+	  The assistant Space runs a model on CPU and can take well over a
+	  minute. This is generous on purpose; the request is on a worker
+	  thread, so waiting costs the desktop nothing.
+
+config ZD_HTTP_STACK_SIZE
+	int "HTTP worker thread stack"
+	depends on ZD_NET
+	default 4096
+
 config ZD_MAX_TIMERS
 	int "Maximum simultaneously running zapp timers, desktop-wide"
 	default 4

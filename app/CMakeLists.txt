@@ -23,6 +23,24 @@ cmake_minimum_required(VERSION 3.20.0)
 #     '=' trips it.
 if(BOARD STREQUAL "qemu_cortex_a53")
   list(APPEND QEMU_EXTRA_FLAGS -device virtio-keyboard-device,bus=virtio-mmio-bus.4)
+
+  # Networking, for the clippy zapp. Added here rather than in the board
+  # fragment for the reason the comment above gives: a CONFIG_ string holding a
+  # second '=' breaks the discarded-groups post-link script, and both of these
+  # are full of them.
+  #
+  # User-mode networking needs no host privileges and no tap device, which is
+  # what makes `west build -t run` still a single command. The guest sees
+  # 10.0.2.15 and reaches the development host at 10.0.2.2 -- the address
+  # zapps/clippy/clippy.c points its proxy URL at.
+  #
+  # NOT gated on CONFIG_ZD_NET, and it cannot be: this block runs above
+  # find_package(Zephyr), so Kconfig has not been processed yet and every
+  # CONFIG_* is empty here. That is the same ordering the comment above
+  # describes. A netdev with nothing bound to it costs the guest nothing, so
+  # it is always offered and the Kconfig decides whether anything uses it.
+  list(APPEND QEMU_EXTRA_FLAGS -netdev user,id=zdnet)
+  list(APPEND QEMU_EXTRA_FLAGS -device virtio-net-device,netdev=zdnet,bus=virtio-mmio-bus.5)
 endif()
 
 # --- out-of-tree board support ------------------------------------------------
@@ -121,6 +139,7 @@ target_sources(app PRIVATE
   src/host/list_api.c
   src/host/text_api.c
   src/host/timer_api.c
+  src/host/http_api.c
   src/host/clipboard.c
   src/host/clock.c
   src/loader/zapp_loader.c
@@ -166,6 +185,19 @@ target_sources_ifdef(CONFIG_ZD_LLEXT_HEAP_REGION app PRIVATE src/loader/llext_he
 
 set(ZD_ZAPP_NAMES hello notes badabi notepad files mines)
 
+# clippy only where it is wanted. Built unconditionally at first, which broke
+# every board that is not the networking one: a zapp whose only possible answer
+# is -ENOSYS is not worth the flash on a board that will never have a network.
+#
+# The knob is ZD_CLIPPY rather than ZD_NET, and it defaults to following ZD_NET,
+# so the behaviour is unchanged -- but it can be forced on without the TCP stack
+# to build the zapp's UI on its own. seed.c guards the install with the same
+# symbol. This is below find_package(Zephyr), so unlike the QEMU flags above,
+# CONFIG_* is readable here.
+if(CONFIG_ZD_CLIPPY)
+  list(APPEND ZD_ZAPP_NAMES clippy)
+endif()
+
 # hello stays a single translation unit on purpose: it is the proof that the
 # simplest possible zapp is still the simplest possible zapp, and it is the only
 # thing that would notice if ELF_OBJECT came back. Everything else links
@@ -173,6 +205,11 @@ set(ZD_ZAPP_NAMES hello notes badabi notepad files mines)
 set(ZD_hello_SOURCES  ${ZD_ZAPPS}/hello/hello.c)
 set(ZD_notes_SOURCES  ${ZD_ZAPPS}/notes/notes.c ${ZD_ZAPPS}/lib/zapplib.c)
 set(ZD_badabi_SOURCES ${ZD_ZAPPS}/badabi/badabi.c)
+set(ZD_clippy_SOURCES
+  ${ZD_ZAPPS}/clippy/clippy.c
+  ${ZD_ZAPPS}/clippy/face.c
+  ${ZD_ZAPPS}/lib/zapplib.c
+)
 set(ZD_notepad_SOURCES
   ${ZD_ZAPPS}/notepad/notepad.c
   ${ZD_ZAPPS}/notepad/commands.c

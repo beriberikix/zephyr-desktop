@@ -42,6 +42,12 @@ static const uint8_t mines_llext[] = {
 #include <mines_llext.inc>
 };
 
+#ifdef CONFIG_ZD_CLIPPY
+static const uint8_t clippy_llext[] = {
+#include <clippy_llext.inc>
+};
+#endif
+
 struct builtin {
 	const char *name;
 	const uint8_t *data;
@@ -54,6 +60,14 @@ static const struct builtin builtins[] = {
 	{ .name = "notepad", .data = notepad_llext, .size = sizeof(notepad_llext) },
 	{ .name = "files", .data = files_llext, .size = sizeof(files_llext) },
 	{ .name = "mines", .data = mines_llext, .size = sizeof(mines_llext) },
+#ifdef CONFIG_ZD_CLIPPY
+	/* Follows ZD_NET by default: seeding an assistant that cannot make a
+	 * request would normally put a zapp in the launcher whose only possible
+	 * answer is -ENOSYS. ZD_CLIPPY can be forced on without the TCP stack
+	 * when that is exactly what is wanted -- see the Kconfig help.
+	 */
+	{ .name = "clippy", .data = clippy_llext, .size = sizeof(clippy_llext) },
+#endif
 	/* Installed on purpose: the ABI version gate is only proven by a zapp
 	 * that has to be refused. See zapps/badabi.
 	 */

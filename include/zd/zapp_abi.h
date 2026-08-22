@@ -49,7 +49,7 @@ extern "C" {
  * here works today. See docs/abi.md for the table.
  */
 #define ZD_ABI_MAJOR 0
-#define ZD_ABI_MINOR 7
+#define ZD_ABI_MINOR 8
 
 /**
  * Longest absolute path the desktop will hand back or accept.
@@ -475,6 +475,26 @@ enum zd_event_type {
 	 * measure elapsed time; use this to know when to look.
 	 */
 	ZD_EV_TIMER,
+	/**
+	 * An http_request() you started has finished; ev->http.id is the value
+	 * it returned. Added in 0.8.
+	 *
+	 * ev->win is NULL, for the same reason ZD_EV_TIMER's is: a request
+	 * belongs to your instance, not to a window, and the desktop has no
+	 * business guessing which of your windows asked. Check the type before
+	 * the usual `ev->win != mine` guard.
+	 *
+	 * ev->http.status is the HTTP status, or a negative errno if the
+	 * request never got that far -- no route, no answer, or a body larger
+	 * than the desktop was willing to hold. ev->http.len is how many bytes
+	 * are readable with http_read().
+	 *
+	 * The body is NOT in the event. It lives in a desktop-owned buffer
+	 * until you call http_release(), which keeps struct zd_event a fixed
+	 * small thing and keeps a zapp from holding a pointer into desktop
+	 * memory across a dispatch it does not control.
+	 */
+	ZD_EV_HTTP_RESPONSE,
 };
 
 struct zd_event {
@@ -533,6 +553,12 @@ struct zd_event {
 		struct {
 			uint16_t id;
 		} timer;
+		/** ZD_EV_HTTP_RESPONSE. Added in 0.8. */
+		struct {
+			uint16_t id;     /**< what http_request() returned */
+			int16_t status;  /**< HTTP status, or negative errno */
+			uint32_t len;    /**< bytes available to http_read() */
+		} http;
 	};
 };
 
@@ -570,6 +596,11 @@ _Static_assert(offsetof(struct zd_event, click) == offsetof(struct zd_event, gri
 		       offsetof(struct zd_event, click) ==
 			       offsetof(struct zd_event, timer),
 	       "the zd_event union moved when the 0.7 members were added");
+/* 0.8's member is the widest yet (uint32_t after two 16-bit fields), which is
+ * still narrower than the pointer the union is already aligned to. Asserted
+ * rather than reasoned about, same as 0.6 and 0.7. */
+_Static_assert(offsetof(struct zd_event, click) == offsetof(struct zd_event, http),
+	       "the 0.8 http member is not at the union's offset");
 
 struct zd_window_desc {
 	const char *title;
@@ -1247,6 +1278,59 @@ struct zd_host_api {
 	int (*timer_start)(zd_zapp_ctx_t ctx, uint32_t period_ms, uint16_t id);
 	/** Stop it. Stopping one that is not running is not an error. */
 	int (*timer_stop)(zd_zapp_ctx_t ctx, uint16_t id);
+
+	/*
+	 * Network, added in 0.8. The first thing in this ABI that does not
+	 * complete on the calling thread.
+	 *
+	 * Everything before this returns when it is done. A network request
+	 * does not: the desktop's own assistant Space answers in tens of
+	 * seconds, and a zapp runs as a callback inside the frame loop, so a
+	 * call that waited would stop the clock, the taskbar and every other
+	 * window for the duration. So this hands the work to a desktop worker
+	 * thread and returns immediately; the answer arrives later as
+	 * ZD_EV_HTTP_RESPONSE, drained from the loop like a keystroke.
+	 *
+	 * That is the same shape input/keys.c uses, and for the same reason:
+	 * work that finishes off the desktop thread may not touch LVGL, so it
+	 * goes on a queue and the loop picks it up.
+	 */
+
+	/**
+	 * Start a request. Returns immediately.
+	 *
+	 * @param url    absolute http:// URL. Not https:// -- the desktop has
+	 *               no TLS stack, and pretending otherwise by silently
+	 *               downgrading would be worse than refusing.
+	 * @param body   request body, or NULL for a GET.
+	 * @param out_id set to the id this request will report in
+	 *               ev->http.id.
+	 * @return 0, -EBUSY if no request slot is free, -EINVAL for a
+	 *         malformed or non-http URL, or -ENOSYS if the build has no
+	 *         networking.
+	 */
+	int (*http_request)(zd_zapp_ctx_t ctx, const char *url, const char *body,
+			    uint16_t *out_id);
+	/**
+	 * Copy part of a completed response body out.
+	 *
+	 * Valid only between ZD_EV_HTTP_RESPONSE and http_release() for that
+	 * id. Reading a released or unknown id gives -EINVAL rather than
+	 * whatever happens to be in the buffer.
+	 *
+	 * @return bytes written, or negative errno. The copy is always
+	 *         NUL-terminated when @a cap is at least 1.
+	 */
+	int (*http_read)(zd_zapp_ctx_t ctx, uint16_t id, uint32_t from, char *buf,
+			 uint32_t cap);
+	/**
+	 * Let the desktop reuse the buffer and the slot.
+	 *
+	 * Not calling this leaks a slot until your instance exits, at which
+	 * point the desktop reclaims everything you were holding -- the same
+	 * bargain as every other handle here.
+	 */
+	void (*http_release)(zd_zapp_ctx_t ctx, uint16_t id);
 };
 
 /* --- the zapp's side ------------------------------------------------------- */

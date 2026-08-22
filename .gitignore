@@ -12,3 +12,4 @@
 
 # session-local scratch
 /.claude/
+__pycache__/
