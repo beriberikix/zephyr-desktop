@@ -296,6 +296,23 @@ int zd_text_set_text(struct zd_zapp_instance *owner, uintptr_t handle, const cha
 
 	rec->suppress++;
 	lv_textarea_set_text(rec->obj, s);
+
+	/* Show the start of what was just set.
+	 *
+	 * lv_textarea_set_text() puts the caret at the end, because that is
+	 * where an insertion point belongs after typing -- and the view follows
+	 * the caret, so replacing the whole contents leaves the reader looking
+	 * at the last line. That is never what "here is the new text" meant. A
+	 * zapp loading a file wants the top of the file; one showing an answer
+	 * wants the first sentence of it.
+	 *
+	 * Note the scroll as well as the caret. Moving the caret alone is not
+	 * enough on a read-only widget, whose cursor is hidden and so does not
+	 * drag the view along behind it. clippy showed the middle of its own
+	 * greeting for exactly that reason.
+	 */
+	lv_textarea_set_cursor_pos(rec->obj, 0);
+	lv_obj_scroll_to_y(rec->obj, 0, LV_ANIM_OFF);
 	rec->suppress--;
 
 	return 0;

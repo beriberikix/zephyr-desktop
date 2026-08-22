@@ -167,17 +167,10 @@ static void say(zd_zapp_ctx_t ctx, struct state *st, const char *text)
 	host->balloon_set_text(ctx, st->bubble, text);
 }
 
-/**
- * The long form, in the scrollable widget underneath.
- *
- * Rewound to the top afterwards. text_set_text leaves the caret at the end,
- * which scrolls a long answer to its last line -- so the first thing the reader
- * saw was the end of it.
- */
+/** The long form, in the scrollable widget underneath. */
 static void show_answer(zd_zapp_ctx_t ctx, struct state *st, const char *text)
 {
 	host->text_set_text(ctx, st->answer, text);
-	host->text_set_cursor(ctx, st->answer, 0);
 }
 
 static void say_waiting(zd_zapp_ctx_t ctx, struct state *st)
