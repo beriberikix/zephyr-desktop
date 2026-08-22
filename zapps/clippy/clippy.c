@@ -32,7 +32,6 @@
 #include <zd/zapp_abi.h>
 
 #include "../lib/zapplib.h"
-#include "clippy.h"
 
 /* Where the answers come from. Plain http on purpose: the desktop has no TLS
  * stack, so tools/hf-proxy.py on the development host terminates TLS and
@@ -60,12 +59,23 @@
  */
 #define CLIPPY_MAX_INSTANCES 2
 
+/* What the paperclip is doing. Mapped onto ZD_ICON_STATE_* in draw_face(); kept
+ * as its own enum because the two are not the same list -- CLIPPY_IDLE blinks,
+ * which is two icon states alternating, and CLIPPY_DONE is just NORMAL.
+ */
+enum clippy_mood {
+	CLIPPY_IDLE = 0,
+	CLIPPY_BUSY,
+	CLIPPY_DONE,
+	CLIPPY_SAD,
+};
+
 struct state {
 	bool used;
 	zd_window_t win;
-	zd_text_t face;   /* the paperclip */
-	zd_text_t answer; /* what came back, or what went wrong */
-	zd_text_t entry;  /* the question being typed */
+	zd_balloon_t bubble; /* the paperclip and what it is saying */
+	zd_text_t answer;    /* what came back, in full and scrollable */
+	zd_text_t entry;     /* the question being typed */
 
 	enum clippy_mood mood;
 	uint32_t tick;
@@ -107,13 +117,58 @@ static struct state *state_of(zd_zapp_ctx_t ctx)
 	return (struct state *)host->get_user_data(ctx);
 }
 
+/*
+ * Push the mood at the desktop, which owns the artwork.
+ *
+ * 0.9 made the paperclip a stock icon rather than a picture this zapp carries.
+ * That is the whole reason there is no longer a face.c here: a zapp cannot draw
+ * -- no framebuffer, no lv_obj_t, and with LLEXT_EXPORT_DEFAULT_GROUPS=n not
+ * one LVGL symbol to link against -- so what used to be five frames of ASCII
+ * art is now a number.
+ *
+ * Idle blinks: three ticks open, one shut. A paperclip that blinks evenly looks
+ * like it is malfunctioning rather than waiting.
+ */
 static void draw_face(zd_zapp_ctx_t ctx, struct state *st)
 {
-	host->text_set_text(ctx, st->face, clippy_face(st->mood, st->tick));
+	uint32_t icon_state = ZD_ICON_STATE_NORMAL;
+
+	switch (st->mood) {
+	case CLIPPY_BUSY:
+		icon_state = ZD_ICON_STATE_BUSY;
+		break;
+	case CLIPPY_SAD:
+		icon_state = ZD_ICON_STATE_SAD;
+		break;
+	case CLIPPY_IDLE:
+		if ((st->tick & 3u) == 3u) {
+			icon_state = ZD_ICON_STATE_BLINK;
+		}
+		break;
+	case CLIPPY_DONE:
+	default:
+		break;
+	}
+
+	host->balloon_set_icon(ctx, st->bubble, ZD_ICON_CLIP, icon_state);
 }
 
-/** Status line under the paperclip. Built without snprintf, which is absent. */
+/**
+ * What the paperclip is saying: short, and in the balloon.
+ *
+ * Split from the answer on purpose. A balloon wraps but does not scroll, and an
+ * answer from the documentation index runs to a couple of thousand characters
+ * -- so the balloon carries the status and the text widget below it carries the
+ * prose. Which also means the thing the user reads while waiting is the thing
+ * that changes, rather than a wall of text with one line moving in it.
+ */
 static void say(zd_zapp_ctx_t ctx, struct state *st, const char *text)
+{
+	host->balloon_set_text(ctx, st->bubble, text);
+}
+
+/** The long form, in the scrollable widget underneath. */
+static void show_answer(zd_zapp_ctx_t ctx, struct state *st, const char *text)
 {
 	host->text_set_text(ctx, st->answer, text);
 }
@@ -134,13 +189,9 @@ static void say_waiting(zd_zapp_ctx_t ctx, struct state *st)
 	uint32_t now = (uint32_t)host->uptime_ms();
 	uint32_t elapsed = (now - st->started_ms) / 1000U;
 
-	at = z_strcpy(st->scratch, sizeof(st->scratch), "Thinking");
-	at = z_append(st->scratch, at, sizeof(st->scratch), "... ");
+	at = z_strcpy(st->scratch, sizeof(st->scratch), "Let me look that up... ");
 	at = z_append_u32(st->scratch, at, sizeof(st->scratch), elapsed);
-	at = z_append(st->scratch, at, sizeof(st->scratch),
-		      "s\n\nThe Space runs its model on CPU, so this takes a while.\n"
-		      "The desktop is not blocked -- drag this window, or go and use\n"
-		      "something else while it thinks.");
+	at = z_append(st->scratch, at, sizeof(st->scratch), "s");
 	(void)at;
 	say(ctx, st, st->scratch);
 }
@@ -173,10 +224,13 @@ static void ask(zd_zapp_ctx_t ctx, struct state *st)
 		 * stdint, and there is no errno.h to link against. So the message
 		 * covers the causes rather than decoding the number.
 		 */
-		say(ctx, st,
-		    "I could not send that.\n\n"
-		    "Either this desktop was built without CONFIG_ZD_NET, or too\n"
-		    "many requests are already in flight.");
+		say(ctx, st, "I could not send that.");
+		show_answer(ctx, st,
+			    "Either this desktop was built without CONFIG_ZD_NET,\n"
+			    "or too many requests are already in flight.\n\n"
+			    "A build with CONFIG_ZD_CLIPPY=y and no networking gets\n"
+			    "exactly this, on purpose: it is how this interface is\n"
+			    "worked on without a TCP stack.");
 		return;
 	}
 
@@ -198,8 +252,7 @@ static void answered(zd_zapp_ctx_t ctx, struct state *st, const struct zd_event 
 		st->mood = CLIPPY_SAD;
 		draw_face(ctx, st);
 
-		uint32_t at = z_strcpy(st->scratch, sizeof(st->scratch),
-				       "That did not work.\n\nStatus: ");
+		uint32_t at = z_strcpy(st->scratch, sizeof(st->scratch), "Status: ");
 		/* Negative status is an errno rather than an HTTP code; say so
 		 * instead of printing a meaningless "-113".
 		 */
@@ -214,7 +267,8 @@ static void answered(zd_zapp_ctx_t ctx, struct state *st, const struct zd_event 
 				      "\n\nThe proxy answered, but not with an answer.");
 		}
 		(void)at;
-		say(ctx, st, st->scratch);
+		say(ctx, st, "That did not work.");
+		show_answer(ctx, st, st->scratch);
 		host->http_release(ctx, ev->http.id);
 		return;
 	}
@@ -234,7 +288,8 @@ static void answered(zd_zapp_ctx_t ctx, struct state *st, const struct zd_event 
 
 	st->mood = CLIPPY_DONE;
 	draw_face(ctx, st);
-	say(ctx, st, st->scratch);
+	say(ctx, st, "Here you go.");
+	show_answer(ctx, st, st->scratch);
 }
 
 static int clippy_init(zd_zapp_ctx_t ctx, const struct zd_host_api *api)
@@ -244,14 +299,21 @@ static int clippy_init(zd_zapp_ctx_t ctx, const struct zd_host_api *api)
 		.geom = { 0, 0, 320, 240 },
 	};
 	struct state *st;
-	struct zd_rect face_at = { 4, 4, 150, 90 };
-	struct zd_rect entry_at = { 4, 98, 300, 28 };
-	struct zd_rect answer_at = { 4, 130, 300, 100 };
+	/* The balloon is as wide as the window and tall enough for the icon,
+	 * which the desktop drops if it is given less. Everything else stacks
+	 * under it. Fixed numbers rather than window_get_content_size(): the
+	 * window is created at a size this zapp chose two lines up, and asking
+	 * the desktop to measure something to find out what was just asked for
+	 * is the read-back trap wm.h warns about.
+	 */
+	struct zd_rect bubble_at = { 4, 4, 304, 60 };
+	struct zd_rect entry_at = { 4, 68, 300, 26 };
+	struct zd_rect answer_at = { 4, 98, 300, 106 };
 
 	host = api;
 
-	if (api->abi_major != ZD_ABI_MAJOR || api->abi_minor < 8) {
-		return -1; /* http_request arrived in 0.8 */
+	if (api->abi_major != ZD_ABI_MAJOR || api->abi_minor < 9) {
+		return -1; /* http_request in 0.8, the balloon in 0.9 */
 	}
 
 	/* z_zero rather than a struct assignment: GCC turns `*st = (struct
@@ -268,10 +330,11 @@ static int clippy_init(zd_zapp_ctx_t ctx, const struct zd_host_api *api)
 		return -1;
 	}
 
-	st->face = api->text_create(ctx, st->win, &face_at, ZD_TEXT_READONLY);
+	st->bubble = api->balloon_create(ctx, st->win, bubble_at.x, bubble_at.y,
+					 bubble_at.w, bubble_at.h, ZD_ICON_CLIP);
 	st->entry = api->text_create(ctx, st->win, &entry_at, ZD_TEXT_ONE_LINE);
 	st->answer = api->text_create(ctx, st->win, &answer_at, ZD_TEXT_READONLY);
-	if (st->face == NULL || st->entry == NULL || st->answer == NULL) {
+	if (st->bubble == NULL || st->entry == NULL || st->answer == NULL) {
 		return -1;
 	}
 

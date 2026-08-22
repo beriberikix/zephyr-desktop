@@ -27,6 +27,7 @@
 #include "chrome/rowlist.h"
 #include "host/clipboard.h"
 #include "host/fs_api.h"
+#include "host/balloon_api.h"
 #include "host/grid_api.h"
 #include "host/list_api.h"
 #include "host/timer_api.h"
@@ -839,6 +840,71 @@ static void test_grid(struct zd_wm *wm)
 }
 
 /*
+ * Balloons: the ownership check, and the one thing that is genuinely new.
+ *
+ * Most of this mirrors test_grid() -- create, drive through a handle, prove
+ * another instance's handle does not resolve, prove nothing outlives the
+ * window. The part worth having is the icon validation, because ZD_ICON_* and
+ * ZD_ICON_STATE_* are the first enums a zapp passes across the ABI as bare
+ * uint32_t. An out-of-range value there has to be refused rather than indexed
+ * with.
+ */
+static void test_balloon(struct zd_wm *wm)
+{
+	struct zd_zapp_instance *mine = (struct zd_zapp_instance *)0xb1;
+	struct zd_zapp_instance *yours = (struct zd_zapp_instance *)0xb2;
+	lv_area_t want = { .x1 = 4, .y1 = 4, .x2 = 4 + 300 - 1, .y2 = 4 + 200 - 1 };
+	uint32_t before = zd_handle_live_count();
+	struct zd_client *client;
+	uintptr_t balloon;
+	uintptr_t stale;
+
+	client = zd_wm_window_create(wm, "selftest balloon api", &want);
+	if (client == NULL) {
+		check(false, "a window for the balloon API checks could be created");
+		return;
+	}
+
+	balloon = zd_balloon_api_create(mine, client, 0, 0, 280, 60, ZD_ICON_CLIP);
+	check(balloon != 0, "a balloon can be created through the ABI layer");
+
+	check(zd_balloon_api_create(mine, client, 0, 0, 280, 60, 99) == 0,
+	      "an icon outside the enum is refused rather than drawn");
+
+	check(zd_balloon_api_set_text(mine, balloon, "hello") == 0,
+	      "the owner can set the text");
+	check(zd_balloon_api_set_icon(mine, balloon, ZD_ICON_CLIP,
+				      ZD_ICON_STATE_BUSY) == 0,
+	      "and the expression");
+	check(zd_balloon_api_set_icon(mine, balloon, ZD_ICON_CLIP, 99) == -EINVAL,
+	      "an icon state outside the enum is refused");
+	check(zd_balloon_api_set_icon(mine, balloon, 99, ZD_ICON_STATE_NORMAL) == -EINVAL,
+	      "and so is an icon outside it");
+	check(zd_balloon_api_set_geometry(mine, balloon, 2, 2, 200, 40) == 0,
+	      "the owner can move and resize it");
+	check(zd_balloon_api_set_geometry(mine, balloon, 2, 2, 0, 40) == -EINVAL,
+	      "a zero-width balloon is refused");
+
+	check(zd_balloon_api_set_text(yours, balloon, "mine now") == -EINVAL,
+	      "another instance's balloon handle does not resolve");
+	check(zd_balloon_api_set_icon(yours, balloon, ZD_ICON_WARN, 0) == -EINVAL,
+	      "and its icon cannot be changed either");
+
+	check(zd_balloon_api_live_count() == 1, "one balloon widget is live");
+
+	stale = balloon;
+	zd_balloon_api_destroy(mine, balloon);
+	check(zd_balloon_api_set_text(mine, stale, "still there?") == -EINVAL,
+	      "a destroyed balloon's handle stops resolving");
+
+	zd_wm_window_close(client);
+	zd_wm_reap(wm);
+
+	check(zd_balloon_api_live_count() == 0, "no balloon widget outlives its window");
+	check(zd_handle_live_count() == before, "and no handle does either");
+}
+
+/*
  * Timers, without ever letting one fire.
  *
  * lv_timer callbacks only run from lv_timer_handler(), which the desktop loop
@@ -1187,6 +1253,7 @@ void zd_selftest_run_wm(struct zd_wm *wm)
 	test_list(wm);
 	test_cellgrid(wm);
 	test_grid(wm);
+	test_balloon(wm);
 	test_timer();
 	test_launch_request();
 	test_text(wm);

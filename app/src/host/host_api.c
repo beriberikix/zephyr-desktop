@@ -19,6 +19,7 @@
 #include "clipboard.h"
 #include "clock.h"
 #include "fs_api.h"
+#include "balloon_api.h"
 #include "grid_api.h"
 #include "host_api.h"
 #include "session.h"
@@ -26,6 +27,7 @@
 #include "text_api.h"
 #include "http_api.h"
 #include "timer_api.h"
+#include "../chrome/balloon.h"
 #include "../chrome/cellgrid.h"
 #include "../chrome/menu.h"
 #include "../loader/zapp_instance.h"
@@ -966,6 +968,64 @@ static int api_grid_set_cell(zd_zapp_ctx_t ctx, zd_grid_t grid, uint8_t col, uin
 		       : -EINVAL;
 }
 
+/* --- balloons ------------------------------------------------------------------ */
+
+/*
+ * The thinnest set in this file. A balloon draws and does nothing else -- no
+ * clicks, no events back over the ABI -- so each of these is a handle check and
+ * a forward.
+ */
+
+static zd_balloon_t api_balloon_create(zd_zapp_ctx_t ctx, zd_window_t win, int16_t x,
+				       int16_t y, int16_t w, int16_t h, uint32_t icon)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+	struct zd_client *client = window_of(ctx, win);
+
+	if (inst == NULL || client == NULL) {
+		return NULL;
+	}
+
+	return (zd_balloon_t)zd_balloon_api_create(inst, client, x, y, w, h, icon);
+}
+
+static void api_balloon_destroy(zd_zapp_ctx_t ctx, zd_balloon_t balloon)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	if (inst != NULL) {
+		zd_balloon_api_destroy(inst, (uintptr_t)balloon);
+	}
+}
+
+static int api_balloon_set_text(zd_zapp_ctx_t ctx, zd_balloon_t balloon, const char *text)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL ? zd_balloon_api_set_text(inst, (uintptr_t)balloon, text)
+			    : -EINVAL;
+}
+
+static int api_balloon_set_geometry(zd_zapp_ctx_t ctx, zd_balloon_t balloon, int16_t x,
+				    int16_t y, int16_t w, int16_t h)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL
+		       ? zd_balloon_api_set_geometry(inst, (uintptr_t)balloon, x, y, w, h)
+		       : -EINVAL;
+}
+
+static int api_balloon_set_icon(zd_zapp_ctx_t ctx, zd_balloon_t balloon, uint32_t icon,
+				uint32_t state)
+{
+	struct zd_zapp_instance *inst = instance_of(ctx);
+
+	return inst != NULL
+		       ? zd_balloon_api_set_icon(inst, (uintptr_t)balloon, icon, state)
+		       : -EINVAL;
+}
+
 static int api_grid_clear(zd_zapp_ctx_t ctx, zd_grid_t grid)
 {
 	struct zd_zapp_instance *inst = instance_of(ctx);
@@ -1068,7 +1128,7 @@ static void api_http_release(zd_zapp_ctx_t ctx, uint16_t id)
 	.grid_get_capacity = api_grid_get_capacity, .grid_set_cell = api_grid_set_cell,    \
 	.grid_clear = api_grid_clear, .timer_start = api_timer_start,                      \
 	.timer_stop = api_timer_stop, .http_request = api_http_request,                    \
-	.http_read = api_http_read, .http_release = api_http_release
+	.http_read = api_http_read, .http_release = api_http_release,                      	.balloon_create = api_balloon_create, .balloon_destroy = api_balloon_destroy,      	.balloon_set_text = api_balloon_set_text,                                          	.balloon_set_geometry = api_balloon_set_geometry,                                  	.balloon_set_icon = api_balloon_set_icon
 
 static const struct zd_host_api host_api_untrusted = {
 	ZD_HOST_API_COMMON,
