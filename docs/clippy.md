@@ -8,6 +8,56 @@ It is the first zapp that waits on something the desktop does not control.
 That image is produced by CI, from a build, on every run -- see
 [Screenshots](#screenshots) below. Nothing here is a mock-up.
 
+## Why the paperclip is the desktop's, not the zapp's
+
+The first version drew it as ASCII art, reasoning that adding an image call to
+the ABI would be the wrong way to draw a paperclip. That reasoning was right and
+the conclusion was wrong: an image call does mean a pixel format, a decoder, a
+lifetime for the pixels and a way for a zapp with no libc to produce them -- but
+it looked like ASCII art.
+
+The alternative it missed is the one a Win95 message box already used.
+`MB_ICONINFORMATION` **names** a picture; it does not carry one. So 0.9 adds
+`ZD_ICON_NONE`/`CLIP`/`INFO`/`WARN` and a balloon to put them in, and the whole
+cost is an enum.
+
+A zapp genuinely cannot draw this itself, and the reason is structural rather
+than a policy anyone chose: no framebuffer, no `lv_obj_t`, and with
+`CONFIG_LLEXT_EXPORT_DEFAULT_GROUPS=n` not one LVGL symbol to link against.
+Even `unsafe_lvgl_content` hands back a pointer nothing in a zapp can call a
+method on. Drawing is the desktop's job by construction.
+
+`app/src/chrome/balloon.c` does it with `lv_draw_rect` and nothing else: rounded
+rectangles with a border and no fill are wire loops, `LV_RADIUS_CIRCLE` ones are
+eyes, and three stepped rectangles are an eyebrow. Arcs would have read better
+in two places, but nothing else in this tree draws one and a widget that does
+not compile looks worse than a paperclip made of stadiums.
+
+The widget is general. A balloon is a coloured panel with wrapped text and an
+optional icon beside it; a warning over a form field is the same thing with a
+different enum value. It follows the `cellgrid.c` precedent of one object
+drawing its own content, with a single child label for the text -- because
+wrapping is worth an object, and LVGL already solves it.
+
+### What three renders cost
+
+Worth writing down, because none of it was visible until there were pixels.
+
+**The balloon came out empty.** The draw callback hung on `LV_EVENT_DRAW_POST`,
+copied from `cellgrid.c` -- which is correct there, because a grid has no
+children and nothing can be covered. This widget has a label, `POST` runs after
+children, and the panel was painted straight over its own text.
+
+**The paperclip was invisible.** It is drawn on the window's own `#C0C0C0` face,
+and the periwinkle taken off the reference art has almost no contrast against
+light grey.
+
+**Then it was a blob.** A 30-pixel-wide loop with a 5-pixel wire and fully
+rounded ends has almost no interior left, so the rounding closes it up; and
+20-pixel eyes on a 40-pixel icon leave nothing of the clip showing around them.
+A clip is about two and a half times as tall as it is wide, and the loop has to
+stay at least three times the wire thickness across.
+
 ## Why it needed a new piece of ABI
 
 Every call in the ABI through 0.7 finishes before it returns. That was fine

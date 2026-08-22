@@ -67,9 +67,15 @@ the other windows keep dragging while a paperclip thinks.
 
 ![Clippy open on the desktop](docs/images/clippy.png)
 
+The paperclip is drawn by the desktop, not shipped by the app: ABI 0.9 lets a
+zapp *name* a stock picture rather than carry one, which is the bargain a Win95
+message box already struck with `MB_ICONINFORMATION`. A zapp has no framebuffer,
+no `lv_obj_t` and not one LVGL symbol to link against, so drawing is the
+desktop's job by construction.
+
 CI builds the zapp, checks it imports nothing, launches it, unloads it and takes
 that screenshot on every run. See [docs/clippy.md](docs/clippy.md) — including
-the three bugs it found on the way in, none of which were in Clippy.
+the bugs it found on the way in, none of which were in Clippy.
 
 **Nothing is destroyed during dispatch.** An app closing its own window is
 running on a stack frame inside code that unloading would free. Every destroy is
