@@ -141,6 +141,7 @@ target_sources_ifdef(CONFIG_ZD_OSK app PRIVATE src/shell/osk.c)
 target_sources_ifdef(CONFIG_ZD_SELFTEST app PRIVATE src/selftest.c)
 target_sources_ifdef(CONFIG_ZD_SMOKE_TEST app PRIVATE src/smoke.c)
 target_sources_ifdef(CONFIG_ZD_TOUCH_PROBE app PRIVATE src/touch_probe.c)
+target_sources_ifdef(CONFIG_ZD_DRAG_BENCH app PRIVATE src/dragbench.c)
 target_sources_ifdef(CONFIG_ZD_SEED_BUILTIN_ZAPPS app PRIVATE src/loader/seed.c)
 target_sources_ifdef(CONFIG_ZD_LLEXT_HEAP_REGION app PRIVATE src/loader/llext_heap.c)
 

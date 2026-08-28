@@ -436,6 +436,20 @@ config ZD_SMOKE_ROUNDS
 	  One round proves it works; the second proves it can be done again,
 	  which is the round that catches a resource freed to the wrong place.
 
+config ZD_DRAG_BENCH
+	bool "Measure what a window-drag frame costs, at boot"
+	depends on ZD_SELFTEST
+	help
+	  Drags a window across the screen with no finger on the panel and
+	  reports min/mean/max frame time, plus a full-screen repaint for scale.
+
+	  "Dragging feels slow" is not a number, and the candidate fixes -- a
+	  cheaper pixel format, the PPA, drawing an outline instead of the
+	  window -- all need a before and an after to choose between.
+
+	  Debug aid. Do not leave it on: it spends a second of boot before the
+	  desktop is usable.
+
 config ZD_SPI_DC_MISO_ARBITER
 	bool "Take the shared SPI MISO pin back from the display for storage"
 	depends on DISK_DRIVER_SDMMC && PINCTRL && LV_Z_LVGL_MUTEX

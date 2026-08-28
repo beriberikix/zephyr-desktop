@@ -35,6 +35,7 @@
 #include "shell/osk.h"
 #include "shell/taskbar.h"
 #include "shell/tasklist.h"
+#include "dragbench.h"
 #include "selftest.h"
 #include "smoke.h"
 #include "wm/wm.h"
@@ -152,6 +153,7 @@ int main(void)
 	zd_dialog_init(&layers, &session);
 	wm.on_key_grab = zd_dialog_key;
 	zd_selftest_run_wm(&wm);
+	zd_dragbench_run(&wm);
 	zd_smoke_init(&wm, &session);
 	lvgl_unlock();
 
