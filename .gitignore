@@ -12,3 +12,7 @@
 
 # session-local scratch
 /.claude/
+
+# vendor firmware read off the board before it was overwritten -- 14 MB,
+# not ours to redistribute, and recoverable with esptool if it is ever needed
+/factory-backup/

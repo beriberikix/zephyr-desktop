@@ -1,0 +1,58 @@
+From e47fd73529ad553b61ae55f759c0532142afa4c4 Mon Sep 17 00:00:00 2001
+From: Jonathan Beri <jmberi@gmail.com>
+Date: Thu, 27 Aug 2026 17:46:13 -0700
+Subject: [PATCH 7/8] soc: espressif: ppa: swap the output block for a quarter
+ turn
+
+ppa_do_scale_rotate_mirror() derives the output block from the input
+one:
+
+    out_block_w = in.block_w * scale_x;
+    out_block_h = in.block_h * scale_y;
+
+and never exchanges them for a 90 or 270 degree rotation, although a
+quarter turn does exactly that. The pair is used twice: to validate the
+block against the output picture, and to fill the RX descriptor.
+
+So a non-square quarter turn is refused with ESP_ERR_INVALID_ARG
+whenever the rotated block does not also fit the unrotated way round --
+rotating 1280x800 into an 800x1280 picture checks 1280 <= 800 -- and
+where it does fit, the descriptor gets the wrong geometry. Square
+transforms are unaffected, which is why the image path did not show it.
+
+IDF's own ppa_srm.c swaps them.
+
+Signed-off-by: Jonathan Beri <jmberi@gmail.com>
+---
+ soc/espressif/common/esp_ppa.c | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/soc/espressif/common/esp_ppa.c b/soc/espressif/common/esp_ppa.c
+index 0389d6ff0..8e9f02816 100644
+--- a/soc/espressif/common/esp_ppa.c
++++ b/soc/espressif/common/esp_ppa.c
+@@ -766,6 +766,21 @@ esp_err_t ppa_do_scale_rotate_mirror(ppa_client_handle_t ppa_client,
+ 	uint32_t out_block_w = (uint32_t)(config->in.block_w * config->scale_x);
+ 	uint32_t out_block_h = (uint32_t)(config->in.block_h * config->scale_y);
+ 
++	/* A quarter turn exchanges the block's width and height. Without this
++	 * the output block keeps the input's shape, which is checked against
++	 * the output picture and then written into the RX descriptor: a
++	 * non-square 90 or 270 degree transform is refused with
++	 * ESP_ERR_INVALID_ARG whenever the rotated block no longer fits the
++	 * unrotated way round, and produces the wrong geometry when it does.
++	 */
++	if (config->rotation_angle == PPA_SRM_ROTATION_ANGLE_90 ||
++	    config->rotation_angle == PPA_SRM_ROTATION_ANGLE_270) {
++		uint32_t swap = out_block_w;
++
++		out_block_w = out_block_h;
++		out_block_h = swap;
++	}
++
+ 	if (config->in.buffer == NULL || config->out.buffer == NULL) {
+ 		return ESP_ERR_INVALID_ARG;
+ 	}
+-- 
+2.55.0
+

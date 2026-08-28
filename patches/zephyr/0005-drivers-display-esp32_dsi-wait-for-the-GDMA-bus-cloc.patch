@@ -1,0 +1,66 @@
+From 0a99a865c6bbe0e0cd5d1b9f421189e796aef262 Mon Sep 17 00:00:00 2001
+From: Jonathan Beri <jmberi@gmail.com>
+Date: Thu, 27 Aug 2026 10:16:56 -0700
+Subject: [PATCH 5/8] drivers: display: esp32_dsi: wait for the GDMA bus clock
+ before resetting
+
+display_esp32_dsi_dma_setup() enabled the DW-GDMA bus clock and reset the
+controller on the next line. Those are writes to two different peripherals,
+and the reset faults with a CPU exception if it lands before the clock enable
+has taken effect.
+
+What makes this worth guarding rather than leaving to luck is that nothing in
+the driver decides it. The same image faults or does not depending on how far
+apart the two writes end up, so it moves with changes that have nothing to do
+with DMA: samples/drivers/display runs, samples/modules/lvgl/demos faults at
+the same instruction with a byte-identical DMA, display and PSRAM Kconfig set
+and byte-identical generated code, and merely switching that build to
+CONFIG_LOG_MODE_IMMEDIATE makes it run.
+
+Read the clock back instead, using the predicate the HAL already provides.
+
+Verified on a Waveshare ESP32-P4-Module-DEV-KIT (v1.3, 800x1280 JD9365):
+the LVGL benchmark demo went from faulting every boot to running.
+
+Signed-off-by: Jonathan Beri <jmberi@gmail.com>
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+---
+ drivers/display/display_esp32_dsi.c | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/drivers/display/display_esp32_dsi.c b/drivers/display/display_esp32_dsi.c
+index b256f0a47..ba6d9968b 100644
+--- a/drivers/display/display_esp32_dsi.c
++++ b/drivers/display/display_esp32_dsi.c
+@@ -10,6 +10,7 @@
+ #include <zephyr/drivers/display.h>
+ #include <zephyr/drivers/mipi_dsi.h>
+ #include <zephyr/kernel.h>
++#include <zephyr/sys/util.h>
+ #include <zephyr/logging/log.h>
+ #include <zephyr/multi_heap/shared_multi_heap.h>
+ #include <zephyr/cache.h>
+@@ -245,6 +246,20 @@ static int display_esp32_dsi_dma_setup(const struct device *dev)
+ 	uint8_t ch = data->dma_channel;
+ 
+ 	dw_gdma_ll_enable_bus_clock(0, true);
++
++	/* Enabling the bus clock and resetting the controller are two writes to
++	 * two different peripherals, and the second one faults if it lands
++	 * before the first has taken effect. Read the clock back rather than
++	 * assuming, using the predicate the HAL provides for it -- without this
++	 * the fault appears and disappears with unrelated changes to the image,
++	 * because what actually decides it is how long the two writes end up
++	 * apart.
++	 */
++	if (!WAIT_FOR(dw_gdma_ll_is_bus_clock_enabled(0), 1000, k_busy_wait(1))) {
++		LOG_ERR("GDMA bus clock did not come up");
++		return -ETIMEDOUT;
++	}
++
+ 	dw_gdma_ll_reset(dma);
+ 
+ 	dw_gdma_ll_enable_controller(dma, true);
+-- 
+2.55.0
+

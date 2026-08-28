@@ -1,0 +1,109 @@
+From a2b64cebf1ebc906dd1f4e7fc6fe34d4001e05e4 Mon Sep 17 00:00:00 2001
+From: Jonathan Beri <jmberi@gmail.com>
+Date: Wed, 26 Aug 2026 22:27:37 -0700
+Subject: [PATCH 2/8] drivers: input: gt911: make irq-gpios optional
+
+The binding marks irq-gpios optional but GT911_INIT reached for it with
+GPIO_DT_SPEC_INST_GET, so a board that does not route the pin could not
+instantiate the driver at all -- even in polling mode, where nothing
+attaches to it.
+
+The driver already anticipated this case: the comment above the address
+selection sequence says it is useful "for boards that do not route the INT
+pin", and alt-addr exists so probing can recover when the AddressMode0 dance
+cannot be performed. Boards where the pin is not brought out at all now land
+on that same path rather than failing to build.
+
+Interrupt mode still needs the pin, so assert that at build time instead of
+letting gpio_add_callback() take a NULL port.
+
+Found on the Waveshare 10.1in DSI touch panel, whose 22-pin FPC carries
+3V3, I2C and the MIPI lanes and no control lines whatsoever.
+
+Signed-off-by: Jonathan Beri <jmberi@gmail.com>
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+---
+ drivers/input/input_gt911.c | 40 +++++++++++++++++++++++++++----------
+ 1 file changed, 29 insertions(+), 11 deletions(-)
+
+diff --git a/drivers/input/input_gt911.c b/drivers/input/input_gt911.c
+index 34ab232e4..0fb4cc4c2 100644
+--- a/drivers/input/input_gt911.c
++++ b/drivers/input/input_gt911.c
+@@ -304,7 +304,7 @@ static int gt911_init(const struct device *dev)
+ 
+ 	int r;
+ 
+-	if (!gpio_is_ready_dt(&config->int_gpio)) {
++	if (config->int_gpio.port != NULL && !gpio_is_ready_dt(&config->int_gpio)) {
+ 		LOG_ERR_DEVICE_NOT_READY(config->int_gpio.port);
+ 		return -ENODEV;
+ 	}
+@@ -329,12 +329,15 @@ static int gt911_init(const struct device *dev)
+ 	 * Note that if an alternate I2C address is set, we will probe
+ 	 * for the alternate address if 0x5D does not work. This is useful
+ 	 * for boards that do not route the INT pin, or only permit it
+-	 * to be used as an input
++	 * to be used as an input. A board that does not bring the pin out at
++	 * all omits irq-gpios entirely and lands on that same probe.
+ 	 */
+-	r = gpio_pin_configure_dt(&config->int_gpio, GPIO_OUTPUT_INACTIVE);
+-	if (r < 0) {
+-		LOG_ERR("Could not configure int GPIO pin");
+-		return r;
++	if (config->int_gpio.port != NULL) {
++		r = gpio_pin_configure_dt(&config->int_gpio, GPIO_OUTPUT_INACTIVE);
++		if (r < 0) {
++			LOG_ERR("Could not configure int GPIO pin");
++			return r;
++		}
+ 	}
+ 	/* Delay at least 10 ms after power on before we configure gt911 */
+ 	k_sleep(K_MSEC(20));
+@@ -350,10 +353,12 @@ static int gt911_init(const struct device *dev)
+ 	/* hold down 50ms to make sure the address available */
+ 	k_sleep(K_MSEC(50));
+ 
+-	r = gpio_pin_configure_dt(&config->int_gpio, GPIO_INPUT);
+-	if (r < 0) {
+-		LOG_ERR("Could not configure interrupt GPIO pin");
+-		return r;
++	if (config->int_gpio.port != NULL) {
++		r = gpio_pin_configure_dt(&config->int_gpio, GPIO_INPUT);
++		if (r < 0) {
++			LOG_ERR("Could not configure interrupt GPIO pin");
++			return r;
++		}
+ 	}
+ 
+ #ifdef CONFIG_INPUT_GT911_INTERRUPT
+@@ -473,12 +478,25 @@ static void gt911_##n##_pm_state_exit(enum pm_state state)
+ #define GT911_PM_NOTIFIER(n)
+ #endif /* CONFIG_PM */
+ 
++/* Interrupt mode has nothing to attach to without the pin, and a board whose
++ * panel FPC does not carry one has to poll. Catch that at build time rather
++ * than as a null dereference in gpio_add_callback().
++ */
++#ifdef CONFIG_INPUT_GT911_INTERRUPT
++#define GT911_IRQ_REQUIRED(index)                                                                  \
++	BUILD_ASSERT(DT_INST_NODE_HAS_PROP(index, irq_gpios),                                      \
++		     "CONFIG_INPUT_GT911_INTERRUPT requires irq-gpios; set it =n to poll");
++#else
++#define GT911_IRQ_REQUIRED(index)
++#endif
++
+ #define GT911_INIT(index)                                                                          \
++	GT911_IRQ_REQUIRED(index)                                                                  \
+ 	static const struct gt911_config gt911_config_##index = {                                  \
+ 		.common = INPUT_TOUCH_DT_INST_COMMON_CONFIG_INIT(index),		           \
+ 		.bus = I2C_DT_SPEC_INST_GET(index),                                                \
+ 		.rst_gpio = GPIO_DT_SPEC_INST_GET_OR(index, reset_gpios, {0}),                     \
+-		.int_gpio = GPIO_DT_SPEC_INST_GET(index, irq_gpios),                               \
++		.int_gpio = GPIO_DT_SPEC_INST_GET_OR(index, irq_gpios, {0}),                               \
+ 		.alt_addr = DT_INST_PROP_OR(index, alt_addr, 0),                                   \
+ 	};                                                                                         \
+ 	GT911_PM_NOTIFIER_FUNCS(index)                                                             \
+-- 
+2.55.0
+

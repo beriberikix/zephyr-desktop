@@ -1,0 +1,124 @@
+From 4489928a1ecc750263613dc6ac4203fa78b1d560 Mon Sep 17 00:00:00 2001
+From: Jonathan Beri <jmberi@gmail.com>
+Date: Thu, 27 Aug 2026 14:30:19 -0700
+Subject: [PATCH 6/8] boards: waveshare: use the PPA on the
+ ESP32-P4-Module-DEV-KIT
+
+Enable the accelerator on the board and configure the LVGL demo for it,
+adapted from the ESP32-P4-Function-EV-Board fragment.
+
+Two things differ. The panel is 800x1280 rather than 1024x600, so the LVGL
+pool and the layered-draw buffer are scaled with the pixels -- LVGL asks for
+about a twentieth of the screen for the latter and says so on screen when it
+does not get it.
+
+The other is the L2 cache, and it is a ceiling rather than a preference. On
+v1.3 the cache is carved off the top of SRAM while the floor is fixed at
+0x4ff40000, so usable SRAM is 0x4ffc0000 - cache - 0x4ff40000: 384 KB at
+128 KB of cache, 256 KB at 256 KB, and nothing at all at 512 KB. The v3.x
+branch anchors the cache at the bottom and has 768 KB to spend, which is why
+the EV board can ask for 512 KB and this cannot. 256 KB also means 64-byte
+cache lines, so the draw buffer alignment the accelerator needs is 64 here
+rather than the EV board's 128.
+
+Signed-off-by: Jonathan Beri <jmberi@gmail.com>
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+---
+ .../esp32p4_module_dev_kit_esp32p4_hpcore.dts |  5 ++
+ ...esp32p4_module_dev_kit_esp32p4_hpcore.conf | 68 +++++++++++++++++++
+ 2 files changed, 73 insertions(+)
+ create mode 100644 samples/modules/lvgl/demos/boards/esp32p4_module_dev_kit_esp32p4_hpcore.conf
+
+diff --git a/boards/waveshare/esp32p4_module_dev_kit/esp32p4_module_dev_kit_esp32p4_hpcore.dts b/boards/waveshare/esp32p4_module_dev_kit/esp32p4_module_dev_kit_esp32p4_hpcore.dts
+index 536370560..88dcae26c 100644
+--- a/boards/waveshare/esp32p4_module_dev_kit/esp32p4_module_dev_kit_esp32p4_hpcore.dts
++++ b/boards/waveshare/esp32p4_module_dev_kit/esp32p4_module_dev_kit_esp32p4_hpcore.dts
+@@ -230,6 +230,11 @@ zephyr_udc0: &usb_otg {
+ 	pinctrl-names = "default";
+ };
+ 
++/* 2D pixel accelerator, used as an LVGL draw unit. */
++&ppa {
++	status = "okay";
++};
++
+ /*
+  * The 10.1in Waveshare DSI panel the DEV-KIT-C ships with: JD9365, 800x1280
+  * portrait, 2 lanes. Timings and clocks are the vendor's own
+diff --git a/samples/modules/lvgl/demos/boards/esp32p4_module_dev_kit_esp32p4_hpcore.conf b/samples/modules/lvgl/demos/boards/esp32p4_module_dev_kit_esp32p4_hpcore.conf
+new file mode 100644
+index 000000000..edce36c9b
+--- /dev/null
++++ b/samples/modules/lvgl/demos/boards/esp32p4_module_dev_kit_esp32p4_hpcore.conf
+@@ -0,0 +1,68 @@
++#
++# Copyright (c) 2026 Jonathan Beri
++#
++# SPDX-License-Identifier: Apache-2.0
++#
++# Adapted from the ESP32-P4-Function-EV-Board fragment. Two things differ: this
++# panel is 800x1280 rather than 1024x600, which is 1.67x the pixels, and this is
++# v1.3 silicon, where the L2 cache cannot be sized the same way.
++
++CONFIG_LV_Z_DEMO_BENCHMARK=y
++CONFIG_LV_USE_PERF_MONITOR=y
++CONFIG_LV_USE_LOG=y
++CONFIG_LV_LOG_LEVEL_USER=y
++
++CONFIG_MAIN_STACK_SIZE=16384
++
++# Render at the panel's native RGB888 straight into the host framebuffers, so
++# presenting a frame swaps a buffer instead of copying one.
++CONFIG_LV_COLOR_DEPTH_24=y
++CONFIG_LV_Z_BUFFER_ALLOC_DISPLAY=y
++
++# Redraw only the areas that changed into the whole screen buffers, which the
++# driver still presents whole.
++CONFIG_LV_Z_DIRECT_RENDERING=y
++
++# The pool is linked into .lvgl_heap, which the SoC linker script places in
++# external RAM. Sized up from the EV board's 2 MB in proportion to the pixels,
++# since the software renderer's intermediate buffers scale with the screen and
++# exhausting the pool faults inside them.
++CONFIG_LV_Z_MEMORY_POOL_CUSTOM_SECTION=y
++CONFIG_LV_Z_MEM_POOL_SIZE=3145728
++
++# Flush from the LVGL thread. The flush thread hands the buffer to the driver
++# from a second thread and never calls lv_display_flush_ready(), so LVGL is free
++# to render the next frame into a buffer the driver has not finished presenting.
++CONFIG_LV_Z_FLUSH_THREAD=n
++
++# LVGL asks for about a twentieth of the screen for layered draws and says so on
++# screen when it does not get it. A twentieth of this panel is 153,600 bytes.
++CONFIG_LV_DRAW_LAYER_SIMPLE_BUF_SIZE=163840
++
++# Offload LVGL fill and image-blend to the PPA. It reaches the draw buffers over
++# 2D-DMA, so they have to be aligned to the L2 cache line -- 64 bytes here, not
++# the EV board's 128, because of the cache size below.
++CONFIG_LV_Z_DRAW_PPA_ESP32=y
++CONFIG_LV_DRAW_BUF_ALIGN=64
++
++# 256 KB, not the EV board's 512 KB, and this is the ceiling rather than a
++# preference. On v1.3 the cache is carved off the top of SRAM while the floor
++# is fixed at 0x4ff40000, so usable SRAM is 0x4ffc0000 - cache - 0x4ff40000:
++# 384 KB at 128 KB of cache, 256 KB at 256 KB, and nothing at all at 512 KB.
++# The v3.x branch anchors the cache at the bottom instead and has 768 KB to
++# spend, which is why the EV board can ask for 512 KB and this cannot.
++# See the SOC_ESP32P4_REV_1_3 branches in soc/espressif/esp32p4/memory.h.
++CONFIG_ESP32_CACHE_L2_256KB=y
++
++# Rendering a demo scene keeps the CPU busy for long stretches, and the input
++# thread runs at the lowest priority by default, so it does not get to drain the
++# queue until the frame is done and the touches are stale by then.
++CONFIG_INPUT_THREAD_PRIORITY_OVERRIDE=y
++CONFIG_INPUT_THREAD_PRIORITY=-1
++CONFIG_INPUT_QUEUE_MAX_MSGS=64
++CONFIG_LV_Z_POINTER_INPUT_MSGQ_COUNT=64
++
++CONFIG_LV_Z_POINTER_FROM_CHOSEN_TOUCH=y
++
++CONFIG_LV_DEF_REFR_PERIOD=16
++CONFIG_CPU_LOAD=y
+-- 
+2.55.0
+

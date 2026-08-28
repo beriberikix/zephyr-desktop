@@ -1,0 +1,279 @@
+From 03b5501ead029f8b0991c71d169dd212f61fc511 Mon Sep 17 00:00:00 2001
+From: Jonathan Beri <jmberi@gmail.com>
+Date: Thu, 27 Aug 2026 17:46:13 -0700
+Subject: [PATCH 8/8] drivers: display: esp32_dsi: present a rotated display
+ via the PPA
+
+The DPI scanout streams the framebuffer exactly as it is laid out, and a
+DSI video-mode panel has no transpose of its own -- MADCTL's row/column
+exchange means nothing to a panel that displays the raster it is handed
+rather than holding a frame. set_orientation() therefore forwards to the
+panel and fails on every panel that cannot do it, which is all of them
+in video mode.
+
+LVGL is no help either: its core rotates only through the draw matrix,
+which the software renderer does not implement, so its own display
+drivers each rotate in their flush callback instead.
+
+So do it here, with the PPA rather than the CPU.
+DISPLAY_ESP32_DSI_ROTATION makes the driver report the transposed
+resolution and turn each frame into the panel's orientation on the way
+to the scanout buffer. Everything above -- LVGL, the application, the
+touch coordinates -- sees a plain landscape display.
+
+The whole buffer is rotated on each present rather than the damaged
+part, which is the cheaper of the two: a partial rotate leaves the other
+scanout buffer stale everywhere else and costs a full-size seeding copy
+to repair, while overwriting the destination outright means the two
+never need reconciling. It is not free -- a quarter turn reads rows and
+writes columns, so it sustains far less than the PPA manages on a fill.
+
+Rotating does not move the digitiser with it; the touchscreen node needs
+swapped-x-y and the matching output-width / output-height.
+
+Signed-off-by: Jonathan Beri <jmberi@gmail.com>
+---
+ drivers/display/Kconfig.esp32_dsi   |  26 +++++
+ drivers/display/display_esp32_dsi.c | 155 ++++++++++++++++++++++++++++
+ 2 files changed, 181 insertions(+)
+
+diff --git a/drivers/display/Kconfig.esp32_dsi b/drivers/display/Kconfig.esp32_dsi
+index a100c9078..51782d713 100644
+--- a/drivers/display/Kconfig.esp32_dsi
++++ b/drivers/display/Kconfig.esp32_dsi
+@@ -33,3 +33,29 @@ config DISPLAY_ESP32_DSI_INIT_PRIORITY
+ 	  controller before the panel.
+ 
+ endif # DISPLAY_ESP32_DSI
++
++config DISPLAY_ESP32_DSI_ROTATION
++	int "Rotate the display by this many degrees"
++	default 0
++	range 0 270
++	depends on DISPLAY_ESP32_DSI
++	help
++	  0, 90, 180 or 270. Anything other than 0 makes the driver present a
++	  rotated display: it reports the transposed resolution and turns each
++	  frame into the panel's orientation with the PPA on the way to the
++	  scanout buffer.
++
++	  This exists because the scanout streams the framebuffer as laid out
++	  and a DSI video-mode panel has no transpose of its own, so a portrait
++	  panel cannot be made landscape anywhere else. LVGL will not do it
++	  either -- its core rotates only through the draw matrix, which the
++	  software renderer does not implement.
++
++	  The caller must render whole screens, which means LVGL wants
++	  LV_Z_DIRECT_RENDERING with its own buffers rather than
++	  LV_Z_BUFFER_ALLOC_DISPLAY: the buffer handed over is no longer one of
++	  this driver's framebuffers, because it has the other orientation.
++
++	  Rotating does not move the touch controller with it. Give the
++	  touchscreen node swapped-x-y and the matching output-width /
++	  output-height, or the pointer will arrive transposed.
+diff --git a/drivers/display/display_esp32_dsi.c b/drivers/display/display_esp32_dsi.c
+index ba6d9968b..0955b622f 100644
+--- a/drivers/display/display_esp32_dsi.c
++++ b/drivers/display/display_esp32_dsi.c
+@@ -24,6 +24,11 @@
+ 
+ #include "display_esp32_dsi.h"
+ 
++#if defined(CONFIG_DISPLAY_ESP32_DSI_ROTATION) && CONFIG_DISPLAY_ESP32_DSI_ROTATION != 0
++#define DSI_ROTATE 1
++#include "driver/ppa.h"
++#endif
++
+ LOG_MODULE_REGISTER(display_esp32_dsi, CONFIG_DISPLAY_LOG_LEVEL);
+ 
+ struct display_esp32_dsi_config {
+@@ -37,6 +42,7 @@ struct display_esp32_dsi_config {
+ 	uint8_t pixel_format;
+ };
+ 
++
+ struct display_esp32_dsi_data {
+ 	const struct device *dev;
+ 	uint8_t dma_channel;
+@@ -66,6 +72,68 @@ struct display_esp32_dsi_data {
+ 		__aligned(DW_GDMA_LL_LINK_LIST_ALIGNMENT);
+ };
+ 
++#ifdef DSI_ROTATE
++/*
++ * Landscape on a portrait panel.
++ *
++ * The DPI scanout streams the framebuffer exactly as it is laid out and this
++ * panel has no transpose bit -- MADCTL's row/column exchange is not a thing in
++ * DSI video mode, where the panel displays the raster it is handed rather than
++ * holding a frame of its own. LVGL will not do it either: its core only rotates
++ * through the draw matrix, which the software renderer does not implement, so
++ * its own drivers each rotate in their flush callback.
++ *
++ * So the rotation happens here, on the way to the scanout buffer, and the PPA
++ * does it rather than the CPU. Everything above this driver -- LVGL, the shell,
++ * the touch coordinates -- sees a plain landscape display.
++ *
++ * The whole buffer is rotated on every present rather than just the damaged
++ * part. That sounds wasteful and is the cheaper of the two: a partial rotate
++ * leaves the other scanout buffer stale everywhere else, which costs a
++ * full-size seeding copy to repair, while overwriting the destination outright
++ * means the two buffers never need reconciling at all.
++ */
++static ppa_client_handle_t dsi_srm_client;
++
++static int dsi_rotate_into(struct display_esp32_dsi_data *data, uint8_t *dst, const void *src,
++			   uint16_t src_w, uint16_t src_h, uint16_t dst_w, uint16_t dst_h)
++{
++	ppa_srm_oper_config_t cfg = {0};
++	esp_err_t err;
++
++	cfg.in.buffer = (void *)src;
++	cfg.in.pic_w = src_w;
++	cfg.in.pic_h = src_h;
++	cfg.in.block_w = src_w;
++	cfg.in.block_h = src_h;
++	cfg.in.srm_cm = PPA_SRM_COLOR_MODE_RGB888;
++
++	cfg.out.buffer = dst;
++	cfg.out.buffer_size = data->fb_size;
++	cfg.out.pic_w = dst_w;
++	cfg.out.pic_h = dst_h;
++	cfg.out.srm_cm = PPA_SRM_COLOR_MODE_RGB888;
++
++	cfg.scale_x = 1.0f;
++	cfg.scale_y = 1.0f;
++	cfg.rotation_angle = (CONFIG_DISPLAY_ESP32_DSI_ROTATION == 90)    ? PPA_SRM_ROTATION_ANGLE_90
++			     : (CONFIG_DISPLAY_ESP32_DSI_ROTATION == 180) ? PPA_SRM_ROTATION_ANGLE_180
++									  : PPA_SRM_ROTATION_ANGLE_270;
++	cfg.mode = PPA_TRANS_MODE_BLOCKING;
++
++	/* The PPA reaches both buffers over 2D-DMA, behind the cache. */
++	sys_cache_data_flush_range((void *)src, (size_t)src_w * src_h * data->bytes_per_pixel);
++
++	err = ppa_do_scale_rotate_mirror(dsi_srm_client, &cfg);
++	if (err != ESP_OK) {
++		LOG_ERR("PPA rotate failed (%d)", err);
++		return -EIO;
++	}
++
++	return 0;
++}
++#endif /* DSI_ROTATE */
++
+ static int display_esp32_dsi_writer_enter(struct display_esp32_dsi_data *data)
+ {
+ 	k_spinlock_key_t key = k_spin_lock(&data->lock);
+@@ -502,6 +570,61 @@ static int display_esp32_dsi_write_locked(const struct device *dev, const uint16
+ 		return -EINVAL;
+ 	}
+ 
++#ifdef DSI_ROTATE
++	{
++		/* The caller drew in the rotated frame, so its idea of the
++		 * screen is the panel's transposed. Take the whole of it and
++		 * turn it into the panel's own orientation.
++		 */
++		uint16_t src_w = (CONFIG_DISPLAY_ESP32_DSI_ROTATION == 90 ||
++				  CONFIG_DISPLAY_ESP32_DSI_ROTATION == 270)
++					 ? config->height
++					 : config->width;
++		uint16_t src_h = (CONFIG_DISPLAY_ESP32_DSI_ROTATION == 90 ||
++				  CONFIG_DISPLAY_ESP32_DSI_ROTATION == 270)
++					 ? config->width
++					 : config->height;
++		uint8_t *fb = data->fb[data->draw_fb];
++		int err;
++
++		if (fb == NULL) {
++			return -EAGAIN;
++		}
++
++		if (desc->width != src_w || desc->height != src_h || x != 0 || y != 0) {
++			/* A partial write cannot be rotated in isolation without
++			 * leaving the rest of the destination stale, and the
++			 * repair costs more than it saves. LVGL is configured
++			 * for whole-screen buffers here, so this does not occur.
++			 */
++			LOG_ERR("rotated display takes whole-screen writes only "
++				"(%ux%u at %u,%u)",
++				desc->width, desc->height, x, y);
++			return -ENOTSUP;
++		}
++
++		if (multi) {
++			err = display_esp32_dsi_wait_buffer_free(data, fb, K_MSEC(100));
++			if (err != 0) {
++				return err;
++			}
++		}
++
++		err = dsi_rotate_into(data, fb, buf, src_w, src_h, config->width, config->height);
++		if (err != 0) {
++			return err;
++		}
++
++		sys_cache_data_flush_range(fb, data->fb_size);
++		display_esp32_dsi_flip(data, data->draw_fb);
++		data->last_fb = data->draw_fb;
++		data->have_last_fb = true;
++		data->draw_fb = (data->draw_fb + 1) % data->fb_count;
++
++		return 0;
++	}
++#endif /* DSI_ROTATE */
++
+ 	if ((uint32_t)x + write_w > config->width || (uint32_t)y + write_h > config->height) {
+ 		LOG_ERR("Write %ux%u at (%u,%u) exceeds %ux%u panel", write_w, write_h, x, y,
+ 			config->width, config->height);
+@@ -759,8 +882,15 @@ static void display_esp32_dsi_get_capabilities(const struct device *dev,
+ 
+ 	memset(capabilities, 0, sizeof(struct display_capabilities));
+ 	capabilities->framebuffer_count = data->fb_count;
++#if defined(DSI_ROTATE) && (CONFIG_DISPLAY_ESP32_DSI_ROTATION == 90 ||                            \
++			    CONFIG_DISPLAY_ESP32_DSI_ROTATION == 270)
++	/* Everything above the driver works in the rotated frame. */
++	capabilities->x_resolution = config->height;
++	capabilities->y_resolution = config->width;
++#else
+ 	capabilities->x_resolution = config->width;
+ 	capabilities->y_resolution = config->height;
++#endif
+ 	capabilities->supported_pixel_formats = config->pixel_format;
+ 	capabilities->current_pixel_format = config->pixel_format;
+ 	capabilities->current_orientation = DISPLAY_ORIENTATION_NORMAL;
+@@ -879,6 +1009,31 @@ static int display_esp32_dsi_init(const struct device *dev)
+ 	data->pending_fb = -1;
+ 	k_sem_init(&data->frame_sem, 0, K_SEM_MAX_LIMIT);
+ 
++#ifdef DSI_ROTATE
++	{
++		ppa_client_config_t ppa_cfg = {
++			.oper_type = PPA_OPERATION_SRM,
++			.max_pending_trans_num = 1,
++		};
++
++		if (ppa_register_client(&ppa_cfg, &dsi_srm_client) != ESP_OK) {
++			LOG_ERR("cannot register the PPA client the rotation needs");
++			return -ENODEV;
++		}
++
++		LOG_INF("rotated %d degrees: %ux%u panel presented as %ux%u",
++			CONFIG_DISPLAY_ESP32_DSI_ROTATION, config->width, config->height,
++			(CONFIG_DISPLAY_ESP32_DSI_ROTATION == 90 ||
++			 CONFIG_DISPLAY_ESP32_DSI_ROTATION == 270)
++				? config->height
++				: config->width,
++			(CONFIG_DISPLAY_ESP32_DSI_ROTATION == 90 ||
++			 CONFIG_DISPLAY_ESP32_DSI_ROTATION == 270)
++				? config->width
++				: config->height);
++	}
++#endif
++
+ 	return 0;
+ }
+ 
+-- 
+2.55.0
+

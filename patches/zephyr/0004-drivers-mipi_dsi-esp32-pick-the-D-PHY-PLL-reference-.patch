@@ -1,0 +1,126 @@
+From 2868eb3f1e8aba360a56f1eda4f32c0d69e587a3 Mon Sep 17 00:00:00 2001
+From: Jonathan Beri <jmberi@gmail.com>
+Date: Wed, 26 Aug 2026 23:02:17 -0700
+Subject: [PATCH 4/8] drivers: mipi_dsi: esp32: pick the D-PHY PLL reference by
+ silicon revision
+
+The driver asked for MIPI_DSI_PHY_PLLREF_CLK_SRC_DEFAULT, which is XTAL and
+only exists from v3.0 on. Before v3.0 the reference is PLL_F20M, reached
+through a different register, and the LL variant for those parts ends its
+switch in abort(). So every pre-v3 board panicked in mipi_dsi_esp32_init()
+with "Environment call from M-mode" before printing anything.
+
+That is not a corner: esp32p4_function_ev_board, which this series enables
+the display on, selects SOC_ESP32P4_REV_1_3. Only the esp32p4x variant is
+v3.1, and that is the one the series was tested against.
+
+Ask for the legacy source by name below v3.0, and use the 20 MHz reference
+frequency that goes with it rather than XTAL's 40 MHz.
+
+Also define ESP32P4_SELECTS_REV_LESS_V3, which hal_espressif compiles
+against but which lives in an ESP-IDF Kconfig this build never sources --
+leaving every v1.3 part built as if it were v3.x. It gates the valid CPU
+frequencies in rtc_clk.c, where the default case is likewise abort().
+
+Requires hal_espressif 89ceac6b, which this series already asks for: the
+DW-GDMA layout the scanout controller drives moved, and the older HAL faults
+on the first register access in dw_gdma_ll_reset().
+
+Verified on a Waveshare ESP32-P4-Module-DEV-KIT (v1.3 silicon, 800x1280
+JD9365 panel): samples/drivers/display now reaches "Display starts".
+
+Signed-off-by: Jonathan Beri <jmberi@gmail.com>
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+---
+ .../esp32p4_module_dev_kit/Kconfig.defconfig      |  8 ++++----
+ drivers/mipi_dsi/dsi_esp32.c                      | 14 +++++++++++++-
+ soc/espressif/esp32p4/Kconfig                     | 15 +++++++++++++++
+ 3 files changed, 32 insertions(+), 5 deletions(-)
+
+diff --git a/boards/waveshare/esp32p4_module_dev_kit/Kconfig.defconfig b/boards/waveshare/esp32p4_module_dev_kit/Kconfig.defconfig
+index 149bb6b2d..90641eebb 100644
+--- a/boards/waveshare/esp32p4_module_dev_kit/Kconfig.defconfig
++++ b/boards/waveshare/esp32p4_module_dev_kit/Kconfig.defconfig
+@@ -4,18 +4,18 @@
+ 
+ if BOARD_ESP32P4_MODULE_DEV_KIT_ESP32P4_HPCORE
+ 
+-config NET_L2_ETHERNET
++configdefault NET_L2_ETHERNET
+ 	default y if DT_HAS_ESPRESSIF_ESP32_ETH_ENABLED
+ 
+ # The panel FPC has no touch interrupt line, so the GT911 has to be polled.
+-config INPUT_GT911_INTERRUPT
++configdefault INPUT_GT911_INTERRUPT
+ 	default n
+ 
+ # The DSI scanout controller allocates its framebuffers from the external
+ # heap: 800*1280*3 is 3,072,000 bytes and it wants two of them. The module
+ # carries 32 MB of PSRAM, so this is not tight, but the default is far too
+ # small and the failure is a runtime -ENOMEM out of a build that succeeded.
+-config ESP_SPIRAM_HEAP_SIZE
+-	default 16777216 if DISPLAY
++configdefault ESP_SPIRAM_HEAP_SIZE
++	default 16777216 if DISPLAY_ESP32_DSI
+ 
+ endif # BOARD_ESP32P4_MODULE_DEV_KIT_ESP32P4_HPCORE
+diff --git a/drivers/mipi_dsi/dsi_esp32.c b/drivers/mipi_dsi/dsi_esp32.c
+index 22e6bbd28..f8ba22fa7 100644
+--- a/drivers/mipi_dsi/dsi_esp32.c
++++ b/drivers/mipi_dsi/dsi_esp32.c
+@@ -26,7 +26,19 @@ LOG_MODULE_REGISTER(dsi_esp32, CONFIG_MIPI_DSI_LOG_LEVEL);
+ 
+ #define MIPI_DSI_DEFAULT_TIMEOUT_CLK_FREQ_MHZ 10
+ #define MIPI_DSI_DEFAULT_ESCAPE_CLK_FREQ_MHZ  18
++/* The D-PHY PLL reference differs across silicon revisions, and the LL layer
++ * aborts on a source its variant does not know. From v3.0 the reference is
++ * XTAL at 40 MHz; before that it is PLL_F20M at 20 MHz, reached through a
++ * different register entirely. MIPI_DSI_PHY_PLLREF_CLK_SRC_DEFAULT is the
++ * v3.0+ answer, so a pre-v3 part has to ask for the legacy source by name.
++ */
++#if defined(CONFIG_SOC_ESP32P4_REV_MIN_FULL) && CONFIG_SOC_ESP32P4_REV_MIN_FULL < 300
++#define MIPI_DSI_PHY_PLLREF_CLK_SRC           MIPI_DSI_PHY_PLLREF_CLK_SRC_DEFAULT_LEGACY
++#define MIPI_DSI_PHY_PLL_REF_CLK_FREQ_HZ      20000000
++#else
++#define MIPI_DSI_PHY_PLLREF_CLK_SRC           MIPI_DSI_PHY_PLLREF_CLK_SRC_DEFAULT
+ #define MIPI_DSI_PHY_PLL_REF_CLK_FREQ_HZ      40000000
++#endif
+ 
+ /* The PHY PLL only has settings for this range, and a rate outside it is
+  * programmed with the wrong one rather than being rejected.
+@@ -310,7 +322,7 @@ static int mipi_dsi_esp32_init(const struct device *dev)
+ 	mipi_dsi_ll_set_phy_config_clock_source(0, MIPI_DSI_PHY_CFG_CLK_SRC_DEFAULT);
+ 	mipi_dsi_ll_enable_phy_config_clock(0, true);
+ 
+-	mipi_dsi_ll_set_phy_pllref_clock_source(0, MIPI_DSI_PHY_PLLREF_CLK_SRC_DEFAULT);
++	mipi_dsi_ll_set_phy_pllref_clock_source(0, MIPI_DSI_PHY_PLLREF_CLK_SRC);
+ 	mipi_dsi_ll_set_phy_pll_ref_clock_div(0, 1);
+ 	mipi_dsi_ll_enable_phy_pllref_clock(0, true);
+ 
+diff --git a/soc/espressif/esp32p4/Kconfig b/soc/espressif/esp32p4/Kconfig
+index 00b600da0..40efeaa4d 100644
+--- a/soc/espressif/esp32p4/Kconfig
++++ b/soc/espressif/esp32p4/Kconfig
+@@ -93,4 +93,19 @@ config SOC_ESP32P4_REV_MIN_FULL
+ 	  Derived from the SOC_ESP32P4_REV_* symbol the board selects; defaults
+ 	  to v3.1 (301), the floor of the v3.x family, when none is selected.
+ 
++config ESP32P4_SELECTS_REV_LESS_V3
++	bool
++	default y if SOC_ESP32P4_REV_1_3
++	help
++	  Hidden option mirroring the ESP-IDF symbol of the same name, which
++	  hal_espressif compiles against but which lives in an IDF Kconfig this
++	  build never sources -- leaving it permanently false and every v1.3
++	  part built as if it were v3.x.
++
++	  It is load-bearing in rtc_clk.c, where the valid CPU frequencies are
++	  360/180/90 on pre-v3 silicon and 400/200/100 from v3.0 on, and the
++	  default case is abort(). All four in-tree v1.3 boards ask for 360, so
++	  the moment anything reconfigures the clock -- enabling PSRAM is
++	  enough -- the chip aborts out of rtc_clk_cpu_freq_set_config().
++
+ endif # SOC_SERIES_ESP32P4
+-- 
+2.55.0
+

@@ -1,0 +1,753 @@
+From 90a3e22a56ec6b3eb43a4cce996f18ab51aaa590 Mon Sep 17 00:00:00 2001
+From: Jonathan Beri <jmberi@gmail.com>
+Date: Wed, 26 Aug 2026 22:27:37 -0700
+Subject: [PATCH 3/8] boards: waveshare: add ESP32-P4-Module-DEV-KIT
+
+Add board support for the Waveshare ESP32-P4-Module-DEV-KIT, a Raspberry Pi
+Model B sized ESP32-P4 board built on the ESP32-P4-Module (32 MB PSRAM,
+16 MB flash, v1.3 silicon). HP and LP core targets, MCUboot sysbuild.
+
+Enabled: UART0 console on the CH343P port (tx=37, rx=38), I2C0, I2S0 for
+the ES8311 codec, the MicroSD slot, 100M Ethernet behind an IP101GR, and
+the MIPI DSI display the DEV-KIT-C ships with -- a JD9365 800x1280 panel
+with a GT911 touch controller.
+
+Peripheral wiring is shared with the ESP32-P4-WIFI6-Dev-Kit this is derived
+from, and was checked against the board schematic and against the pins the
+board's own ESP-IDF factory firmware prints at boot.
+
+Two things differ from the Espressif Function EV board and are easy to get
+wrong. The panel's FPC carries no reset, backlight or touch interrupt line:
+reset and backlight are registers on the panel board's MCU at 0x45, and the
+GT911 is polled. GPIO26 and GPIO27, which the EV board uses for panel reset
+and backlight, are 40-pin header I/O here and reach nothing.
+
+The ESP32-C6 is on SDIO rather than SPI, so Zephyr's esp_hosted driver
+cannot drive it; the wiring is recorded but wireless is not available.
+
+Signed-off-by: Jonathan Beri <jmberi@gmail.com>
+Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>
+---
+ .../waveshare/esp32p4_module_dev_kit/Kconfig  |   8 +
+ .../esp32p4_module_dev_kit/Kconfig.defconfig  |  21 ++
+ .../Kconfig.esp32p4_module_dev_kit            |  10 +
+ .../esp32p4_module_dev_kit/Kconfig.sysbuild   |  11 +
+ .../esp32p4_module_dev_kit/board.cmake        |  11 +
+ .../esp32p4_module_dev_kit/board.yml          |   6 +
+ .../esp32p4_module_dev_kit/doc/index.rst      |  98 ++++++
+ ...module_dev_kit_esp32p4_hpcore-pinctrl.dtsi |  62 ++++
+ .../esp32p4_module_dev_kit_esp32p4_hpcore.dts | 279 ++++++++++++++++++
+ ...esp32p4_module_dev_kit_esp32p4_hpcore.yaml |  24 ++
+ ...p4_module_dev_kit_esp32p4_hpcore_defconfig |  11 +
+ .../esp32p4_module_dev_kit_esp32p4_lpcore.dts |  34 +++
+ ...esp32p4_module_dev_kit_esp32p4_lpcore.yaml |  19 ++
+ ...p4_module_dev_kit_esp32p4_lpcore_defconfig |  12 +
+ 14 files changed, 606 insertions(+)
+ create mode 100644 boards/waveshare/esp32p4_module_dev_kit/Kconfig
+ create mode 100644 boards/waveshare/esp32p4_module_dev_kit/Kconfig.defconfig
+ create mode 100644 boards/waveshare/esp32p4_module_dev_kit/Kconfig.esp32p4_module_dev_kit
+ create mode 100644 boards/waveshare/esp32p4_module_dev_kit/Kconfig.sysbuild
+ create mode 100644 boards/waveshare/esp32p4_module_dev_kit/board.cmake
+ create mode 100644 boards/waveshare/esp32p4_module_dev_kit/board.yml
+ create mode 100644 boards/waveshare/esp32p4_module_dev_kit/doc/index.rst
+ create mode 100644 boards/waveshare/esp32p4_module_dev_kit/esp32p4_module_dev_kit_esp32p4_hpcore-pinctrl.dtsi
+ create mode 100644 boards/waveshare/esp32p4_module_dev_kit/esp32p4_module_dev_kit_esp32p4_hpcore.dts
+ create mode 100644 boards/waveshare/esp32p4_module_dev_kit/esp32p4_module_dev_kit_esp32p4_hpcore.yaml
+ create mode 100644 boards/waveshare/esp32p4_module_dev_kit/esp32p4_module_dev_kit_esp32p4_hpcore_defconfig
+ create mode 100644 boards/waveshare/esp32p4_module_dev_kit/esp32p4_module_dev_kit_esp32p4_lpcore.dts
+ create mode 100644 boards/waveshare/esp32p4_module_dev_kit/esp32p4_module_dev_kit_esp32p4_lpcore.yaml
+ create mode 100644 boards/waveshare/esp32p4_module_dev_kit/esp32p4_module_dev_kit_esp32p4_lpcore_defconfig
+
+diff --git a/boards/waveshare/esp32p4_module_dev_kit/Kconfig b/boards/waveshare/esp32p4_module_dev_kit/Kconfig
+new file mode 100644
+index 000000000..39dabb6da
+--- /dev/null
++++ b/boards/waveshare/esp32p4_module_dev_kit/Kconfig
+@@ -0,0 +1,8 @@
++# Copyright (c) 2026 Jonathan Beri
++#
++# SPDX-License-Identifier: Apache-2.0
++
++config HEAP_MEM_POOL_ADD_SIZE_BOARD
++	int
++	default 4096 if BOARD_ESP32P4_MODULE_DEV_KIT_ESP32P4_HPCORE
++	default 256 if BOARD_ESP32P4_MODULE_DEV_KIT_ESP32P4_LPCORE
+diff --git a/boards/waveshare/esp32p4_module_dev_kit/Kconfig.defconfig b/boards/waveshare/esp32p4_module_dev_kit/Kconfig.defconfig
+new file mode 100644
+index 000000000..149bb6b2d
+--- /dev/null
++++ b/boards/waveshare/esp32p4_module_dev_kit/Kconfig.defconfig
+@@ -0,0 +1,21 @@
++# Copyright (c) 2026 Jonathan Beri
++#
++# SPDX-License-Identifier: Apache-2.0
++
++if BOARD_ESP32P4_MODULE_DEV_KIT_ESP32P4_HPCORE
++
++config NET_L2_ETHERNET
++	default y if DT_HAS_ESPRESSIF_ESP32_ETH_ENABLED
++
++# The panel FPC has no touch interrupt line, so the GT911 has to be polled.
++config INPUT_GT911_INTERRUPT
++	default n
++
++# The DSI scanout controller allocates its framebuffers from the external
++# heap: 800*1280*3 is 3,072,000 bytes and it wants two of them. The module
++# carries 32 MB of PSRAM, so this is not tight, but the default is far too
++# small and the failure is a runtime -ENOMEM out of a build that succeeded.
++config ESP_SPIRAM_HEAP_SIZE
++	default 16777216 if DISPLAY
++
++endif # BOARD_ESP32P4_MODULE_DEV_KIT_ESP32P4_HPCORE
+diff --git a/boards/waveshare/esp32p4_module_dev_kit/Kconfig.esp32p4_module_dev_kit b/boards/waveshare/esp32p4_module_dev_kit/Kconfig.esp32p4_module_dev_kit
+new file mode 100644
+index 000000000..d588c535d
+--- /dev/null
++++ b/boards/waveshare/esp32p4_module_dev_kit/Kconfig.esp32p4_module_dev_kit
+@@ -0,0 +1,10 @@
++# Waveshare ESP32-P4-Module-DEV-KIT configuration
++#
++# Copyright (c) 2026 Jonathan Beri
++#
++# SPDX-License-Identifier: Apache-2.0
++
++config BOARD_ESP32P4_MODULE_DEV_KIT
++	select SOC_ESP32P4_HPCORE if BOARD_ESP32P4_MODULE_DEV_KIT_ESP32P4_HPCORE
++	select SOC_ESP32P4_LPCORE if BOARD_ESP32P4_MODULE_DEV_KIT_ESP32P4_LPCORE
++	select SOC_ESP32P4_REV_1_3
+diff --git a/boards/waveshare/esp32p4_module_dev_kit/Kconfig.sysbuild b/boards/waveshare/esp32p4_module_dev_kit/Kconfig.sysbuild
+new file mode 100644
+index 000000000..8d932b89a
+--- /dev/null
++++ b/boards/waveshare/esp32p4_module_dev_kit/Kconfig.sysbuild
+@@ -0,0 +1,11 @@
++# Copyright (c) 2026 Jonathan Beri
++#
++# SPDX-License-Identifier: Apache-2.0
++
++choice BOOTLOADER
++	default BOOTLOADER_MCUBOOT
++endchoice
++
++choice BOOT_SIGNATURE_TYPE
++	default BOOT_SIGNATURE_TYPE_NONE
++endchoice
+diff --git a/boards/waveshare/esp32p4_module_dev_kit/board.cmake b/boards/waveshare/esp32p4_module_dev_kit/board.cmake
+new file mode 100644
+index 000000000..b5b806216
+--- /dev/null
++++ b/boards/waveshare/esp32p4_module_dev_kit/board.cmake
+@@ -0,0 +1,11 @@
++# Copyright (c) 2026 Jonathan Beri
++#
++# SPDX-License-Identifier: Apache-2.0
++
++if(NOT "${OPENOCD}" MATCHES "^${ESPRESSIF_TOOLCHAIN_PATH}/.*")
++  set(OPENOCD OPENOCD-NOTFOUND)
++endif()
++find_program(OPENOCD openocd PATHS ${ESPRESSIF_TOOLCHAIN_PATH}/openocd-esp32/bin NO_DEFAULT_PATH)
++
++include(${ZEPHYR_BASE}/boards/common/esp32.board.cmake)
++include(${ZEPHYR_BASE}/boards/common/openocd.board.cmake)
+diff --git a/boards/waveshare/esp32p4_module_dev_kit/board.yml b/boards/waveshare/esp32p4_module_dev_kit/board.yml
+new file mode 100644
+index 000000000..42bd23f1a
+--- /dev/null
++++ b/boards/waveshare/esp32p4_module_dev_kit/board.yml
+@@ -0,0 +1,6 @@
++board:
++  name: esp32p4_module_dev_kit
++  full_name: ESP32-P4-Module-DEV-KIT
++  vendor: waveshare
++  socs:
++  - name: esp32p4
+diff --git a/boards/waveshare/esp32p4_module_dev_kit/doc/index.rst b/boards/waveshare/esp32p4_module_dev_kit/doc/index.rst
+new file mode 100644
+index 000000000..a104f1a67
+--- /dev/null
++++ b/boards/waveshare/esp32p4_module_dev_kit/doc/index.rst
+@@ -0,0 +1,98 @@
++.. zephyr:board:: esp32p4_module_dev_kit
++
++Overview
++********
++
++The Waveshare ESP32-P4-Module-DEV-KIT is a Raspberry Pi Model B sized
++multimedia board built around the ESP32-P4-Module, which packages an
++ESP32-P4NRW32 with 32 MB of stacked PSRAM and 16 MB of NOR flash. It carries
++wired connectivity (USB, 100M Ethernet with PoE header, MicroSD), audio,
++MIPI CSI/DSI connectors and a 40-pin GPIO header. Wireless comes from an
++on-board ESP32-C6 reached over SDIO.
++
++This board definition provides both high-performance (HP) core and low-power
++(LP) core targets.
++
++Hardware
++********
++
++The board included peripherals:
++
++- ESP32-P4-Module (silicon revision v1.3) with 32 MB stacked PSRAM in HEX
++  mode and 16 MB on-module NOR flash
++- Type-C USB-to-UART port (CH343P) for power, flashing and the serial
++  console, wired to UART0 (tx=GPIO37, rx=GPIO38)
++- Type-A USB OTG 2.0 HS port behind a CH334F hub, host/device switchable
++  via jumper
++- 100M Ethernet RJ45 with an IC+ IP101GR PHY (RMII: clk=50, tx_en=49,
++  txd0=34, txd1=35, crs_dv=28, rxd0=29, rxd1=30; SMI: mdc=31, mdio=52;
++  reset=GPIO51, PHY address 1), with a PoE module header
++- ES8311 audio codec on I2S0 (mclk=13, bclk=12, ws=10, din=11, dout=9) with
++  a speaker PA enabled by GPIO53, and an on-board microphone
++- MicroSD slot (4-bit SDHC at 40 MHz: clk=43, cmd=44, d0=39, d1=40, d2=41,
++  d3=42) powered through a GPIO45 load switch
++- I2C0 (sda=GPIO7, scl=GPIO8), shared by the audio codec and both the CSI
++  and DSI connectors; separate I2C and I3C headers
++- 2-lane MIPI DSI display connector and 2-lane MIPI CSI camera connector
++- RTC battery holder (rechargeable batteries only)
++- 40-pin GPIO expansion header, boot and reset buttons
++
++Display
++=======
++
++The DEV-KIT-C variant ships with the Waveshare 10.1in DSI touch panel, and
++the board devicetree enables it: a Jadard JD9365 at 800x1280 over two lanes,
++with a Goodix GT911 touch controller at 0x5D on the shared I2C bus.
++
++Two things about that panel are worth knowing before wiring anything else to
++it. Its 22-pin FPC carries only 3V3, I2C and the MIPI lanes, so **there is no
++reset, backlight or touch-interrupt line**: panel reset and backlight are
++register writes to the panel board's own MCU at I2C address 0x45, and the
++GT911 has to be polled, which is why ``CONFIG_INPUT_GT911_INTERRUPT`` is
++defaulted off here. The panel also draws its backlight power from a
++**separate 2-pin 5V connector** that has to be plugged in as well as the FPC.
++
++Do not copy the ESP32-P4-Function-EV-Board's ``reset-gpios``/``bl-gpios`` for
++this panel. GPIO26 and GPIO27 are 40-pin header I/O on this board and are not
++connected to the display.
++
++The panel is natively portrait and the JD9365 has no transpose bit, so
++``display_set_orientation()`` accepts only ``DISPLAY_ORIENTATION_NORMAL``.
++
++Wireless
++========
++
++The ESP32-C6 co-processor is wired over SDIO (clk=18, cmd=19, d0-d3=14-17,
++with the C6 held in reset by GPIO54). Zephyr's ``esp_hosted`` driver is
++SPI-only, so there is nothing to bind to it yet and Wi-Fi and Bluetooth are
++not available. The wiring is recorded in the devicetree for whoever adds it.
++
++.. include:: ../../../espressif/common/soc-esp32p4-features.rst
++   :start-after: espressif-soc-esp32p4-features
++
++Supported Features
++==================
++
++.. zephyr:board-supported-hw::
++
++Programming and Debugging
++*************************
++
++.. zephyr:board-supported-runners::
++
++.. include:: ../../../espressif/common/building-flashing.rst
++   :start-after: espressif-building-flashing
++
++Debugging
++=========
++
++.. include:: ../../../espressif/common/openocd-debugging.rst
++   :start-after: espressif-openocd-debugging
++
++References
++**********
++
++.. target-notes::
++
++.. _`Waveshare ESP32-P4-Module-DEV-KIT Wiki`: https://docs.waveshare.com/ESP32-P4-Module-DEV-KIT
++.. _`Waveshare 10.1-DSI-TOUCH-A Wiki`: https://www.waveshare.com/wiki/10.1-DSI-TOUCH-A
+diff --git a/boards/waveshare/esp32p4_module_dev_kit/esp32p4_module_dev_kit_esp32p4_hpcore-pinctrl.dtsi b/boards/waveshare/esp32p4_module_dev_kit/esp32p4_module_dev_kit_esp32p4_hpcore-pinctrl.dtsi
+new file mode 100644
+index 000000000..baee7c1e1
+--- /dev/null
++++ b/boards/waveshare/esp32p4_module_dev_kit/esp32p4_module_dev_kit_esp32p4_hpcore-pinctrl.dtsi
+@@ -0,0 +1,62 @@
++/*
++ * Copyright (c) 2026 Jonathan Beri
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++#include <zephyr/dt-bindings/pinctrl/esp-pinctrl-common.h>
++#include <zephyr/dt-bindings/pinctrl/esp32p4-pinctrl.h>
++#include <zephyr/dt-bindings/pinctrl/esp32p4-gpio-sigmap.h>
++
++&pinctrl {
++	uart0_default: uart0_default {
++		group1 {
++			pinmux = <UART0_TX_GPIO37>;
++			output-high;
++		};
++
++		group2 {
++			pinmux = <UART0_RX_GPIO38>;
++			bias-pull-up;
++		};
++	};
++
++	i2c0_default: i2c0_default {
++		group1 {
++			pinmux = <I2C0_SDA_GPIO7>,
++				 <I2C0_SCL_GPIO8>;
++			bias-pull-up;
++			drive-open-drain;
++			output-high;
++		};
++	};
++
++	i2s0_default: i2s0_default {
++		group1 {
++			pinmux = <I2S0_MCLK_GPIO13>,
++				 <I2S0_O_BCK_GPIO12>,
++				 <I2S0_O_WS_GPIO10>,
++				 <I2S0_I_SD_GPIO11>,
++				 <I2S0_O_SD_GPIO9>;
++		};
++	};
++
++	mdio_default: mdio_default {
++		group1 {
++			pinmux = <SMI_MDC_GPIO31>,
++				 <SMI_MDIO_GPIO52>;
++		};
++	};
++
++	rmii_default: rmii_default {
++		group1 {
++			pinmux = <RMII_CLK_GPIO50>,
++				 <RMII_TX_EN_GPIO49>,
++				 <RMII_TXD0_GPIO34>,
++				 <RMII_TXD1_GPIO35>,
++				 <RMII_CRS_DV_GPIO28>,
++				 <RMII_RXD0_GPIO29>,
++				 <RMII_RXD1_GPIO30>;
++		};
++	};
++};
+diff --git a/boards/waveshare/esp32p4_module_dev_kit/esp32p4_module_dev_kit_esp32p4_hpcore.dts b/boards/waveshare/esp32p4_module_dev_kit/esp32p4_module_dev_kit_esp32p4_hpcore.dts
+new file mode 100644
+index 000000000..536370560
+--- /dev/null
++++ b/boards/waveshare/esp32p4_module_dev_kit/esp32p4_module_dev_kit_esp32p4_hpcore.dts
+@@ -0,0 +1,279 @@
++/*
++ * Copyright (c) 2026 Jonathan Beri
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++/dts-v1/;
++
++#include <espressif/esp32p4/esp32p4_n16r32.dtsi>
++#include "esp32p4_module_dev_kit_esp32p4_hpcore-pinctrl.dtsi"
++#include <zephyr/dt-bindings/input/input-event-codes.h>
++#include <espressif/partitions_0x2000_default_16M.dtsi>
++#include <zephyr/dt-bindings/display/panel.h>
++#include <zephyr/dt-bindings/mipi_dsi/mipi_dsi.h>
++
++/ {
++	model = "Waveshare ESP32-P4-Module-DEV-KIT HP Core";
++	compatible = "espressif,esp32p4";
++
++	chosen {
++		zephyr,sram = &sramhp;
++		zephyr,console = &uart0;
++		zephyr,shell-uart = &uart0;
++		zephyr,flash = &flash0;
++		zephyr,code-partition = &slot0_partition;
++		zephyr,display = &dsi_display;
++		zephyr,touch = &gt911;
++	};
++
++	aliases {
++		sdhc0 = &sdhc0;
++		sw0 = &boot_button;
++		watchdog0 = &wdt0;
++	};
++
++	gpio_keys {
++		compatible = "gpio-keys";
++
++		boot_button: button {
++			label = "Boot Button";
++			gpios = <&gpio1 3 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
++			zephyr,code = <INPUT_KEY_0>;
++		};
++	};
++};
++
++/* v1.3 silicon */
++&cpu0 {
++	clock-frequency = <DT_FREQ_M(360)>;
++};
++
++&cpu1 {
++	clock-frequency = <DT_FREQ_M(360)>;
++};
++
++&uart0 {
++	status = "okay";
++	current-speed = <115200>;
++	pinctrl-0 = <&uart0_default>;
++	pinctrl-names = "default";
++};
++
++&i2c0 {
++	status = "okay";
++	clock-frequency = <I2C_BITRATE_FAST>;
++	pinctrl-0 = <&i2c0_default>;
++	pinctrl-names = "default";
++
++	/* Shared with the ES8311 codec and both the CSI and DSI connectors. */
++
++	gt911: touch-controller@5d {
++		compatible = "goodix,gt911";
++		status = "okay";
++		reg = <0x5d>;
++		screen-width = <800>;
++		screen-height = <1280>;
++		/* The 22-pin DSI FPC carries 3V3, I2C and the MIPI lanes and
++		 * nothing else, so there is no interrupt and no reset line to
++		 * give this. Polled, and the address-select dance is skipped.
++		 */
++	};
++};
++
++/* ES8311 codec, speaker PA on GPIO53, and the on-board microphone. */
++&i2s0 {
++	status = "okay";
++	unit = <0>;
++	pinctrl-0 = <&i2s0_default>;
++	pinctrl-names = "default";
++};
++
++&spi2 {
++	status = "disabled";
++};
++
++&trng0 {
++	status = "okay";
++};
++
++&coretemp {
++	status = "okay";
++};
++
++&gpio0 {
++	status = "okay";
++};
++
++&gpio1 {
++	status = "okay";
++};
++
++&wdt0 {
++	status = "okay";
++};
++
++&dma {
++	status = "okay";
++};
++
++&dma_axi {
++	status = "okay";
++};
++
++zephyr_udc0: &usb_otg {
++	status = "okay";
++};
++
++&usb_serial {
++	status = "okay";
++	current-speed = <115200>;
++};
++
++&sdhc {
++	sdhc0: sdhc@0 {
++		status = "okay";
++		bus-width = <4>;
++		max-bus-freq = <40000000>;
++		/* GPIO45: SD card power enable (active-low) */
++		pwr-gpios = <&gpio1 13 GPIO_ACTIVE_LOW>;
++		clk-pin = <43>;
++		cmd-pin = <44>;
++		d0-pin = <39>;
++		d1-pin = <40>;
++		d2-pin = <41>;
++		d3-pin = <42>;
++
++		mmc {
++			compatible = "zephyr,sdmmc-disk";
++			disk-name = "SD";
++			status = "okay";
++		};
++	};
++
++	/* ESP32-C6 wireless co-processor over SDIO (kept disabled until
++	 * there is a driver binding for it; pins follow the schematic:
++	 * clk=18, cmd=19, d0-d3=14-17, with 51K pull-ups on the C6 side, and
++	 * the C6 held in reset by GPIO54). Confirmed against this board's own
++	 * ESP-IDF factory firmware, which prints exactly these pins.
++	 *
++	 * Zephyr's esp_hosted driver is SPI-only, so there is nothing to bind
++	 * to it yet -- this records the wiring, it does not enable Wi-Fi.
++	 */
++	sdhc1: sdhc@1 {
++		status = "disabled";
++		bus-width = <4>;
++		clk-pin = <18>;
++		cmd-pin = <19>;
++		d0-pin = <14>;
++		d1-pin = <15>;
++		d2-pin = <16>;
++		d3-pin = <17>;
++	};
++};
++
++&ldo {
++	status = "okay";
++
++	ldo1@1 {
++		reg = <1>;
++		regulator-name = "ldo1";
++		regulator-init-microvolt = <3300000>;
++		regulator-boot-on;
++		regulator-always-on;
++	};
++
++	ldo2@2 {
++		reg = <2>;
++		regulator-name = "ldo2";
++		regulator-init-microvolt = <1800000>;
++		regulator-boot-on;
++		regulator-always-on;
++	};
++
++	ldo3@3 {
++		reg = <3>;
++		regulator-name = "ldo3";
++		regulator-init-microvolt = <2500000>;
++		regulator-boot-on;
++		regulator-always-on;
++	};
++
++	ldo4@4 {
++		reg = <4>;
++		regulator-name = "ldo4";
++		regulator-init-microvolt = <3300000>;
++		regulator-boot-on;
++		regulator-always-on;
++	};
++};
++
++&mdio {
++	pinctrl-0 = <&mdio_default>;
++	pinctrl-names = "default";
++	status = "okay";
++
++	phy: ethernet-phy@1 {
++		compatible = "ethernet-phy";
++		reg = <1>;
++		/* GPIO51: PHY reset (active-low) */
++		reset-gpios = <&gpio1 19 GPIO_ACTIVE_LOW>;
++		reset-assert-duration-us = <10000>;
++		reset-deassertion-timeout-ms = <100>;
++	};
++};
++
++&eth {
++	status = "okay";
++	phy-handle = <&phy>;
++	pinctrl-0 = <&rmii_default>;
++	pinctrl-names = "default";
++};
++
++/*
++ * The 10.1in Waveshare DSI panel the DEV-KIT-C ships with: JD9365, 800x1280
++ * portrait, 2 lanes. Timings and clocks are the vendor's own
++ * (JD9365_800_1280_PANEL_60HZ_DPI_CONFIG): 80 MHz DPI pixel clock, which
++ * divides the P4's fixed 240 MHz source exactly, and a 1500 Mbps lane rate.
++ *
++ * Reset and backlight are I2C registers on the panel board's own MCU rather
++ * than GPIOs -- see the carrier-i2c property and the driver.
++ */
++&mipi_dsi {
++	status = "okay";
++	phy-clock = <1500000000>;
++	dpi-clock-frequency = <80000000>;
++
++	jd9365: panel-controller@0 {
++		compatible = "jadard,jd9365";
++		reg = <0>;
++		status = "okay";
++		data-lanes = <2>;
++		pixel-format = <MIPI_DSI_PIXFMT_RGB888>;
++		width = <800>;
++		height = <1280>;
++		carrier-i2c = <&i2c0>;
++		carrier-address = <0x45>;
++
++		display-timings {
++			compatible = "zephyr,panel-timing";
++			hsync-len = <20>;
++			hback-porch = <20>;
++			hfront-porch = <40>;
++			vsync-len = <4>;
++			vback-porch = <10>;
++			vfront-porch = <30>;
++			hsync-active = <0>;
++			vsync-active = <0>;
++			de-active = <1>;
++			pixelclk-active = <0>;
++		};
++	};
++};
++
++&dsi_display {
++	status = "okay";
++	pixel-format = <PANEL_PIXEL_FORMAT_RGB_888>;
++	width = <800>;
++	height = <1280>;
++};
+diff --git a/boards/waveshare/esp32p4_module_dev_kit/esp32p4_module_dev_kit_esp32p4_hpcore.yaml b/boards/waveshare/esp32p4_module_dev_kit/esp32p4_module_dev_kit_esp32p4_hpcore.yaml
+new file mode 100644
+index 000000000..df88cb89b
+--- /dev/null
++++ b/boards/waveshare/esp32p4_module_dev_kit/esp32p4_module_dev_kit_esp32p4_hpcore.yaml
+@@ -0,0 +1,24 @@
++identifier: esp32p4_module_dev_kit/esp32p4/hpcore
++name: Waveshare ESP32-P4-Module-DEV-KIT HP Core
++type: mcu
++arch: riscv
++toolchain:
++  - zephyr
++testing:
++  ignore_tags:
++    - heap
++supported:
++  - counter
++  - display
++  - dma
++  - entropy
++  - gpio
++  - hwinfo
++  - i2c
++  - i2s
++  - input
++  - netif:eth
++  - sdhc
++  - uart
++  - watchdog
++vendor: waveshare
+diff --git a/boards/waveshare/esp32p4_module_dev_kit/esp32p4_module_dev_kit_esp32p4_hpcore_defconfig b/boards/waveshare/esp32p4_module_dev_kit/esp32p4_module_dev_kit_esp32p4_hpcore_defconfig
+new file mode 100644
+index 000000000..2e49cedc3
+--- /dev/null
++++ b/boards/waveshare/esp32p4_module_dev_kit/esp32p4_module_dev_kit_esp32p4_hpcore_defconfig
+@@ -0,0 +1,11 @@
++# Copyright (c) 2026 Jonathan Beri
++#
++# SPDX-License-Identifier: Apache-2.0
++
++CONFIG_CONSOLE=y
++CONFIG_SERIAL=y
++CONFIG_UART_CONSOLE=y
++CONFIG_GPIO=y
++CONFIG_I2C=y
++CONFIG_REGULATOR=y
++CONFIG_MAIN_STACK_SIZE=4096
+diff --git a/boards/waveshare/esp32p4_module_dev_kit/esp32p4_module_dev_kit_esp32p4_lpcore.dts b/boards/waveshare/esp32p4_module_dev_kit/esp32p4_module_dev_kit_esp32p4_lpcore.dts
+new file mode 100644
+index 000000000..55833de7a
+--- /dev/null
++++ b/boards/waveshare/esp32p4_module_dev_kit/esp32p4_module_dev_kit_esp32p4_lpcore.dts
+@@ -0,0 +1,34 @@
++/*
++ * Copyright (c) 2026 Jonathan Beri
++ *
++ * SPDX-License-Identifier: Apache-2.0
++ */
++
++/dts-v1/;
++
++#include <espressif/esp32p4/esp32p4_lpcore_n16.dtsi>
++#include <espressif/partitions_0x2000_default_16M.dtsi>
++
++/ {
++	model = "Waveshare ESP32-P4-Module-DEV-KIT LP Core";
++	compatible = "espressif,esp32p4";
++
++	chosen {
++		zephyr,sram = &sramlp;
++		zephyr,console = &lp_uart;
++		zephyr,shell-uart = &lp_uart;
++		zephyr,flash = &flash0;
++		zephyr,code-partition = &slot0_lpcore_partition;
++	};
++};
++
++&lp_uart {
++	status = "okay";
++	current-speed = <115200>;
++
++	/* SoC default GPIO14/15 are wired to the ESP32-C6 SDIO interface;
++	 * use GPIO5/GPIO4 (40-pin header pins 9/11) for the console instead.
++	 */
++	tx-pin = <5>;
++	rx-pin = <4>;
++};
+diff --git a/boards/waveshare/esp32p4_module_dev_kit/esp32p4_module_dev_kit_esp32p4_lpcore.yaml b/boards/waveshare/esp32p4_module_dev_kit/esp32p4_module_dev_kit_esp32p4_lpcore.yaml
+new file mode 100644
+index 000000000..650b85a61
+--- /dev/null
++++ b/boards/waveshare/esp32p4_module_dev_kit/esp32p4_module_dev_kit_esp32p4_lpcore.yaml
+@@ -0,0 +1,19 @@
++identifier: esp32p4_module_dev_kit/esp32p4/lpcore
++name: Waveshare ESP32-P4-Module-DEV-KIT LP Core
++type: mcu
++arch: riscv
++toolchain:
++  - zephyr
++supported:
++  - cpu
++  - uart
++  - serial
++testing:
++  only_tags:
++    - introduction
++  ignore_tags:
++    - kernel
++    - posix
++    - chre
++    - cpp
++vendor: waveshare
+diff --git a/boards/waveshare/esp32p4_module_dev_kit/esp32p4_module_dev_kit_esp32p4_lpcore_defconfig b/boards/waveshare/esp32p4_module_dev_kit/esp32p4_module_dev_kit_esp32p4_lpcore_defconfig
+new file mode 100644
+index 000000000..18fb06d19
+--- /dev/null
++++ b/boards/waveshare/esp32p4_module_dev_kit/esp32p4_module_dev_kit_esp32p4_lpcore_defconfig
+@@ -0,0 +1,12 @@
++# SPDX-License-Identifier: Apache-2.0
++
++CONFIG_THREAD_STACK_INFO=n
++CONFIG_THREAD_CUSTOM_DATA=n
++CONFIG_BOOT_BANNER=n
++CONFIG_SERIAL=y
++CONFIG_CONSOLE=y
++CONFIG_UART_CONSOLE=y
++CONFIG_PRINTK=n
++CONFIG_CBPRINTF_NANO=y
++CONFIG_SIZE_OPTIMIZATIONS=y
++CONFIG_BUSYWAIT_CPU_LOOPS_PER_USEC=4
+-- 
+2.55.0
+
