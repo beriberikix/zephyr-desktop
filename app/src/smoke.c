@@ -33,12 +33,25 @@
 
 LOG_MODULE_DECLARE(zd_main, CONFIG_ZD_LOG_LEVEL);
 
-/* Ticks to wait for the loop to settle after a launch or a close. Generous:
- * a close is a request, a grace period, a reap and an unload, and the point of
+/* Ticks to wait for the loop to settle after a launch. Generous: the point of
  * the test is to observe the end state rather than to race it.
  */
 #define SETTLE_TICKS 4
-#define CLOSE_TICKS  ((CONFIG_ZD_CLOSE_GRACE_MS / CONFIG_ZD_TICK_MAX_MS) + 8)
+
+/*
+ * How long to wait out a close, in milliseconds -- not in ticks.
+ *
+ * This used to be CLOSE_GRACE_MS / TICK_MAX_MS ticks, which quietly assumed
+ * every loop iteration sleeps for the whole of TICK_MAX_MS. It does not: the
+ * loop sleeps for MIN(what lv_timer_handler() asked for, TICK_MAX_MS), so the
+ * tick is as short as LV_DEF_REFR_PERIOD. Dropping that period from 33 ms to
+ * 16 on one board took the wait from 2.22 s to 1.52 s, expiring it before the
+ * 2 s grace period it exists to outlast -- and the test then reported a leak
+ * for the one zapp whose whole purpose is to make the grace period fire.
+ *
+ * A wall-clock deadline cannot be knocked out of true by a refresh rate.
+ */
+#define CLOSE_WAIT_MS (CONFIG_ZD_CLOSE_GRACE_MS + 500)
 
 enum smoke_phase {
 	SMOKE_IDLE,
@@ -68,6 +81,7 @@ static struct {
 	enum smoke_phase phase;
 	unsigned int round;
 	unsigned int wait;
+	int64_t wait_until; /* uptime deadline, 0 when not waiting on the clock */
 	unsigned int launched;
 	unsigned int refused;
 	unsigned int failures;
@@ -139,6 +153,13 @@ void zd_smoke_tick(void)
 		return;
 	}
 
+	if (smoke.wait_until != 0) {
+		if (k_uptime_get() < smoke.wait_until) {
+			return;
+		}
+		smoke.wait_until = 0;
+	}
+
 	switch (smoke.phase) {
 	case SMOKE_LAUNCH:
 		smoke.launched = 0;
@@ -196,7 +217,7 @@ void zd_smoke_tick(void)
 		LOG_INF("SMOKE round %u: asked %u window(s) to close", smoke.round + 1,
 			request_close_all());
 		smoke.phase = SMOKE_DRAIN;
-		smoke.wait = CLOSE_TICKS;
+		smoke.wait_until = k_uptime_get() + CLOSE_WAIT_MS;
 		break;
 
 	case SMOKE_DRAIN:
