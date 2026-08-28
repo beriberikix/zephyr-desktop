@@ -1,0 +1,34 @@
+/*
+ * Landscape, and the touch controller turned to match.
+ *
+ * The zapps live on the microSD card, which the board .dts already describes
+ * (sdhc0 in 4-bit mode with a zephyr,sdmmc-disk named "SD"), so nothing is
+ * needed here for storage.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/*
+ * Rotating the display does not rotate the digitiser: the GT911 still reports
+ * in the panel's own 800x1280 frame. The properties are applied in the order
+ * invert, then swap, then scale, so with the panel turned 270 degrees:
+ *
+ *   inverted-x   (x, y) -> (799 - x, y)
+ *   swapped-x-y            -> (y, 799 - x)
+ *   output-*               -> scaled into 1280x800
+ *
+ * which is the mapping the 270 degree rotation needs. The swap alone is a
+ * reflection rather than a rotation, so exactly one axis has to be inverted;
+ * inverting the other one instead is the 90 degree case, and lands every
+ * touch diagonally opposite where it belongs.
+ *
+ * output-width / output-height are what make the swap usable here at all: the
+ * swapped axes carry each other's range, and 800 and 1280 are not the same
+ * number, so without the rescale both axes are wrong as well as exchanged.
+ */
+&gt911 {
+	swapped-x-y;
+	inverted-x;
+	output-width = <1280>;
+	output-height = <800>;
+};
